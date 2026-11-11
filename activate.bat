@@ -1,0 +1,2 @@
+
+SET mydir=%cd%

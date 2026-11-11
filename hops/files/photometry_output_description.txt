@@ -1,0 +1,113 @@
+
+--- FOV.pdf ---
+Shows the field of view and the selected targets and comparison stars
+
+--- RESULTS.pdf ---
+Shows the relative light curves for the target and the comparison stars.
+
+--- ExoClock_info.txt ---
+Contains the information that you will need to uplod to ExoClock, if you are observing an exoplanet and you wish to
+contribute to the ExoClock project (https://www.exoclock.space). See inside the file for more information.
+
+--- PHOTOMETRY_APERTURE.txt ---
+Contains the relative light curve of the target as calculated by the aperture photometry method. The columns contain
+the following information (in order):
+1. exposure start time in JD_UTC
+2. relative flux (flux of the target divided by the sum of all the comparison stars)
+3. relative flux uncertainty
+
+CAUTION!!!!!!!
+The uncertainties reported do not take into account the gain and the read-noise of the camera.
+If the read-noise of your camera is much lower than the flux of the stars studied, the true
+uncertainties can be approximated by dividing the reported uncertainties with the square root of the camera's gain.
+
+--- PHOTOMETRY_GAUSS.txt ---
+Contains the relative light curve of the target as calculated by the PSF fitting photometry method. The columns contain
+the following information (in order):
+1. exposure start time in JD_UTC
+2. relative flux (flux of the target divided by the sum of all the comparison stars)
+3. relative flux uncertainty
+
+CAUTION!!!!!!!
+The uncertainties reported do not take into account the gain and the read-noise of the camera.
+If the read-noise of your camera is much lower than the flux of the stars studied, the true
+uncertainties can be approximated by dividing the reported uncertainties with the square root of the camera's gain.
+
+--- PHOTOMETRY_a.txt ---
+Contains all the data related to the aperture photometry method. The columns contain
+the following information (in order):
+1. file name
+2. exposure start time in JD_UTC
+3. target x position in pixels
+4. comparison 1 x position in pixels
+5 comparison 2 x position in pixels
+6 comparison 3 x position in pixels
+...
+. target y position in pixels
+. comparison 1 y position in pixels
+. comparison 2 y position in pixels
+. comparison 3 y position in pixels
+...
+. target flux in counts
+. comparison 1 flux in counts
+. comparison 2 flux in counts
+. comparison 3 flux in counts
+...
+. target flux uncertainty in counts
+. comparison 1 flux uncertainty in counts
+. comparison 2 flux uncertainty in counts
+. comparison 3 flux uncertainty in counts
+...
+. target background in counts
+. comparison 1 background in counts
+. comparison 2 background in counts
+. comparison 3 background in counts
+...
+. target background uncertainty in counts
+. comparison 1 background uncertainty in counts
+. comparison 2 background uncertainty in counts
+. comparison 3 background uncertainty in counts
+...
+
+--- PHOTOMETRY_g.txt ---
+Contains all the data related to the PSF fitting photometry method. The columns contain
+the following information (in order):
+1. file name
+2. exposure start time in JD_UTC
+3. target x position in pixels
+4. comparison 1 x position in pixels
+5 comparison 2 x position in pixels
+6 comparison 3 x position in pixels
+. comparison 2 x position in pixels
+. comparison 3 x position in pixels
+...
+. target y position in pixels
+. comparison 1 y position in pixels
+. comparison 2 y position in pixels
+. comparison 3 y position in pixels
+...
+. target PSF STD across axis 1
+. comparison 1 PSF STD across axis 1 in pixels
+. comparison 2 PSF STD across axis 1 in pixels
+. comparison 3 PSF STD across axis 1 in pixels
+...
+. target PSF STD across axis 2
+. comparison 1 PSF STD across axis 2 in pixels
+. comparison 2 PSF STD across axis 2 in pixels
+. comparison 3 PSF STD across axis 2 in pixels
+...
+. target flux in counts
+. comparison 1 flux in counts
+. comparison 2 flux in counts
+. comparison 3 flux in counts
+...
+. target flux uncertainty in counts
+. comparison 1 flux uncertainty in counts
+. comparison 2 flux uncertainty in counts
+. comparison 3 flux uncertainty in counts
+...
+. target flux measurement uncertainty in counts
+. comparison 1 flux measurement uncertainty in counts
+. comparison 2 flux measurement uncertainty in counts
+. comparison 3 flux measurement uncertainty in counts
+...
