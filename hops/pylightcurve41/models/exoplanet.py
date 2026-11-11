@@ -858,6 +858,48 @@ class Planet:
                                                                       fitting.results['detrended_series']['flux_unc'],
                                                                       fitting.results['detrended_series']['model'],
                                                                       len(fitting.fitted_parameters))
+        ####### SNR calculation
+
+        ld1 = fitting.results['parameters']['a_1']['value']
+        ld2 = fitting.results['parameters']['a_2']['value']
+        ld3 = fitting.results['parameters']['a_3']['value']
+        ld4 = fitting.results['parameters']['a_4']['value']
+
+        rp = fitting.results['parameters']['rp_over_rs']['value']
+        rp_err = max(fitting.results['parameters']['rp_over_rs']['p_error'], fitting.results['parameters']['rp_over_rs']['m_error'])
+
+        dp1 = transit_depth(
+            [ld1,ld2,ld3,ld4],
+            max(rp - rp_err, 0),
+            fitting.results['parameters']['period']['value'],
+            fitting.results['parameters']['sma_over_rs']['value'],
+            fitting.results['parameters']['eccentricity']['value'],
+            fitting.results['parameters']['inclination']['value'],
+            fitting.results['parameters']['periastron']['value'])
+
+        dp2 = transit_depth(
+            [ld1,ld2,ld3,ld4],
+            max(rp, 0),
+            fitting.results['parameters']['period']['value'],
+            fitting.results['parameters']['sma_over_rs']['value'],
+            fitting.results['parameters']['eccentricity']['value'],
+            fitting.results['parameters']['inclination']['value'],
+            fitting.results['parameters']['periastron']['value'])
+
+        dp3 = transit_depth(
+            [ld1,ld2,ld3,ld4],
+            max(rp + rp_err, 0),
+            fitting.results['parameters']['period']['value'],
+            fitting.results['parameters']['sma_over_rs']['value'],
+            fitting.results['parameters']['eccentricity']['value'],
+            fitting.results['parameters']['inclination']['value'],
+            fitting.results['parameters']['periastron']['value'])
+
+        achieved_snr = dp2 / (0.5 * (dp3 - dp1))
+
+
+        fitting.results['SNR'] = achieved_snr
+
 
         for observation in self.observations:
 

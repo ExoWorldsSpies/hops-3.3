@@ -1,4 +1,3 @@
-
 __all__ = ['HOPS']
 
 import os
@@ -6,17 +5,18 @@ import glob
 import datetime
 import traceback
 import webbrowser
-import hops.pylightcurve41 as plc
 
-from .application_log import HOPSLog
-from .application_windows import MainWindow
-from .application_1_data_target import DataTargetWindow
-from .application_2_reduction import ReductionWindow
-from .application_3_inspection import InspectiontWindow
-from .application_4_alignment import AlignmentWindow
-from .application_5_photometry import PhotometryWindow, PhotometryProgressWindow
-from .application_6_fitting import FittingWindow
-from .application_extra_1_observing_planner import ObservingPlannerWindow
+from hops.application_log import HOPSLog
+from hops.application_windows import MainWindow
+from hops.application_1_data_target import DataTargetWindow
+from hops.application_2_reduction import ReductionWindow
+from hops.application_3_inspection import InspectiontWindow
+from hops.application_4_alignment import AlignmentWindow
+from hops.application_5_photometry import PhotometryWindow, PhotometryProgressWindow
+from hops.application_6_fitting import FittingWindow
+from hops.application_extra_1_observing_planner import ObservingPlannerWindow
+
+from hops.hops_tools.files import open_dict, save_dict
 
 
 class HOPS(MainWindow):
@@ -41,12 +41,12 @@ class HOPS(MainWindow):
 
         # directory
 
-        self.data_target_button = self.Button(text='** SELECT DATA & TARGET **', command=self.select_data_target)
+        self.data_target_button = self.Button(text='** SELECT DATA & TARGET **', commands=[self.select_data_target])
         self.data_target_complete = self.Label()
 
         # reduction
 
-        self.reduction_button = self.Button(text='** RUN REDUCTION **', command=self.run_reduction)
+        self.reduction_button = self.Button(text='** RUN REDUCTION **', commands=[self.run_reduction])
         self.reduction_complete = self.Label()
 
         # for backwards compatibility
@@ -54,14 +54,18 @@ class HOPS(MainWindow):
             if not self.log.is_version_new(self.log.get_param('reduction_version'), '3.2.0'):
                 self.log.set_param('reduction_complete', False)
 
+        if self.log.get_param('photometry_complete'):
+            if not self.log.is_version_new(self.log.get_param('photometry_version'), '3.2.0'):
+                self.log.set_param('photometry_complete', False)
+
         # inspection
 
-        self.inspection_button = self.Button(text='INSPECT FRAMES', command=self.inspect_frames)
+        self.inspection_button = self.Button(text='INSPECT FRAMES', commands=[self.inspect_frames])
         self.inspection_complete = self.Label()
 
         # alignment
 
-        self.alignment_button = self.Button(text='** RUN ALIGNMENT **', command=self.run_alignment)
+        self.alignment_button = self.Button(text='** RUN ALIGNMENT **', commands=[self.run_alignment])
         self.alignment_complete = self.Label()
 
         # for backwards compatibility
@@ -71,7 +75,7 @@ class HOPS(MainWindow):
 
         # photometry
 
-        self.photometry_button = self.Button(text='** PHOTOMETRY **', command=self.photometry)
+        self.photometry_button = self.Button(text='** PHOTOMETRY **', commands=[self.photometry])
         self.photometry_complete = self.Label()
 
         # for backwards compatibility
@@ -81,7 +85,7 @@ class HOPS(MainWindow):
 
         # fitting
 
-        self.fitting_button = self.Button(text='EXOPLANET FITTING', command=self.fitting)
+        self.fitting_button = self.Button(text='EXOPLANET FITTING', commands=[self.fitting])
         self.fitting_complete = self.Label()
 
         if self.log.get_param('fitting_complete'):
@@ -92,14 +96,16 @@ class HOPS(MainWindow):
 
         self.setup_window([
             [[logo, 0, 2, 6]],
-            [[self.Label(text='{0}\nv{1}'.format(self.log.software_name, self.log.version)), 2, 1, 1, 'title']],
+            [[self.Label(
+                text='{0}\nv{1}'.format(self.log.software_name, self.log.version), title=True
+            ), 2, 1, 1]],
             [[self.Label(text='Copyright (c) 2017-{1} Angelos Tsiaras, aggelostsiaras@gmail.com'.format(
-              self.log.version, datetime.date.today().year)), 2]],
-            [[self.Button(text=self.log.updates, command=self.open_updates), 2, 1, 2]],
+                self.log.version, datetime.date.today().year)), 2]],
+            [[self.Button(text=self.log.updates, commands=[self.open_updates]), 2, 1, 2]],
             [],
-            [[self.Button(text='MY PROFILE', command=self.open_my_profile), 2]],
+            [[self.Button(text='MY PROFILE', commands=[self.open_my_profile]), 2]],
             [],
-            [[self.Label(text='Analyse your data step by step'), 0, 3, 1, 'title']],
+            [[self.Label(text='Analyse your data step by step', title=True), 0, 3, 1]],
             [],
             [[self.Label(text='     1. '), 0], [self.data_target_button, 1], [self.data_target_complete, 2]],
             [],
@@ -113,17 +119,17 @@ class HOPS(MainWindow):
             [],
             [[self.Label(text='     6. '), 0], [self.fitting_button, 1], [self.fitting_complete, 2]],
             [],
-            [[self.Label(text='** mandatory step **'), 1], [self.Button(text='EXIT', command=self.close), 2]],
+            [[self.Label(text='** mandatory step **'), 1], [self.Button(text='EXIT', commands=[self.close]), 2]],
             [],
             [[self.Label(text='Extra tools:'), 1]],
-            [[self.Button(text='OBSERVING PLANNER', command=self.open_observing_planner), 1]],
+            [[self.Button(text='OBSERVING PLANNER', commands=[self.open_observing_planner]), 1]],
             []
         ])
 
         self.update_window()
 
     def open_updates(self):
-            webbrowser.open("https://www.exoworldsspies.com/en/software/", new=1)
+        webbrowser.open("https://www.exoworldsspies.com/en/software/", new=1)
 
     def open_my_profile(self):
 
@@ -144,9 +150,11 @@ class HOPS(MainWindow):
 
         elements_per_column = 17
         structure = [
-            [[self.my_profile_window.Label(text='Header Keywords for useful information,\nif included in the FITS header:'), 0, 2],
-             [self.my_profile_window.Label(text='Default values for useful information,\nif not included in the FITS header:'), 2, 2],
-             [self.my_profile_window.Label(text='\nDefault values:'), 4, 2]
+            [[self.my_profile_window.Label(
+                text='Header Keywords for useful information,\nif included in the FITS header:'), 0, 2],
+             [self.my_profile_window.Label(
+                 text='Default values for useful information,\nif not included in the FITS header:'), 2, 2],
+             [self.my_profile_window.Label(text='\nDefault settings:'), 4, 2]
              ],
             [],
         ]
@@ -156,24 +164,31 @@ class HOPS(MainWindow):
 
         for jj, header in enumerate(list(self.my_profile_core_headers)):
 
-            column = int(jj/elements_per_column)
-            row = jj - column * elements_per_column + 2
+            if header != 'local_gaia_db':
 
-            if '___' in header:
-                if column == 1:
-                    structure[row].append([self.my_profile_window.Label(text='   Not Applicable   '), column * 2, 2])
+                column = int(jj / elements_per_column)
+                row = jj - column * elements_per_column + 2
+
+                if '___' in header:
+                    if column == 1:
+                        structure[row].append(
+                            [self.my_profile_window.Label(text='   Not Applicable   '), column * 2, 2])
+                    else:
+                        pass
                 else:
-                    pass
-            else:
-                structure[row].append([self.my_profile_labels[header], column * 2])
-                structure[row].append([self.my_profile_entries[header], column * 2 + 1])
+                    structure[row].append([self.my_profile_labels[header], column * 2])
+                    structure[row].append([self.my_profile_entries[header], column * 2 + 1])
+
+                if column > 1:
+                    self.my_profile_entries[header].width = 10
 
         structure[9].append([self.my_profile_window.Label(text='Information used only by the scheduler:'), 4, 2])
 
-        structure.append([])
 
-        structure.append([[self.my_profile_window.Button(text='SAVE CHANGES & CLOSE WINDOW',
-                                                         command=self.update_local_log_profile), 0, 6]])
+        structure.append([[self.my_profile_window.Button(
+            text='SAVE CHANGES & CLOSE WINDOW', commands=[self.update_local_log_profile]
+        ), 0, 8]])
+
         structure.append([])
 
         self.my_profile_window.setup_window(structure)
@@ -185,6 +200,13 @@ class HOPS(MainWindow):
         for header in self.my_profile_core_headers:
             test[header] = self.my_profile_entries[header].get()
         self.log.save_local_log_profile(test)
+
+        self.log.load_local_log_profile()
+        try:
+            os.chdir(self.log.get_param('directory'))
+            self.log.load_local_log()
+        except:
+            pass
 
         self.my_profile_window.close()
 
@@ -248,10 +270,7 @@ class HOPS(MainWindow):
             self.disable()
 
             inspection_window = InspectiontWindow(self.log)
-            inspection_window.run(f_after=[
-                                      inspection_window.first_image_warning,
-                                      inspection_window.show
-                                  ])
+            inspection_window.run(f_after=[inspection_window.first_image_warning, inspection_window.show])
 
             self.activate()
             self.update_window()
@@ -276,8 +295,10 @@ class HOPS(MainWindow):
             self.disable()
 
             alignment_window = AlignmentWindow(self.log)
-            alignment_window.run(f_before=alignment_window.progress_figure.adjust_size,
-                                 f_after=alignment_window.run_alignment)
+            alignment_window.run(
+                f_before=alignment_window.progress_figure.adjust_size,
+                f_after=alignment_window.run_alignment
+            )
 
             self.activate()
             self.update_window()
@@ -382,10 +403,10 @@ class HOPS(MainWindow):
         try:
 
             self.disable()
-    
+
             observing_planner_window = ObservingPlannerWindow(self.log)
             observing_planner_window.run()
-    
+
             self.activate()
 
         except:
@@ -403,15 +424,16 @@ class HOPS(MainWindow):
         if self.log.get_param('data_target_complete'):
 
             self.data_target_complete.set('Data:     {0}\nTarget:     {1}\nLocation:     {2}'.format(
-                self.log.get_param('directory_short'), self.log.get_param('target_name'), self.log.get_param('location')))
+                self.log.get_param('directory_short'), self.log.get_param('target_name'),
+                self.log.get_param('location')))
 
             self.reduction_button.activate()
             trash = 0
 
-            if not os.path.isfile(self.log.all_frames):
+            if not os.path.isfile(self.log.all_frames_path):
                 self.log.set_param('reduction_complete', False)
             else:
-                all_frames = plc.open_dict(self.log.all_frames)
+                all_frames = open_dict(self.log.all_frames_path)
                 for i in all_frames:
                     if not os.path.isfile(os.path.join(self.log.reduction_directory, i)):
                         self.log.set_param('reduction_complete', False)
@@ -425,13 +447,13 @@ class HOPS(MainWindow):
                 self.inspection_complete.set('Files discarded: {0}'.format(trash))
                 self.alignment_button.activate()
 
-                all_frames = plc.open_dict(self.log.all_frames)
+                all_frames = open_dict(self.log.all_frames_path)
                 for i in all_frames:
                     if not all_frames[i][self.log.skip_key] and not all_frames[i][self.log.align_x0_key]:
                         self.log.set_param('alignment_complete', False)
-                plc.save_dict(all_frames, self.log.all_frames)
+                save_dict(all_frames, self.log.all_frames_path)
 
-                if not os.path.isfile(self.log.all_stars):
+                if not os.path.isfile(self.log.all_stars_path):
                     self.log.set_param('alignment_complete', False)
 
                 if self.log.get_param('alignment_complete'):
@@ -443,11 +465,13 @@ class HOPS(MainWindow):
                         self.log.set_param('photometry_complete', False)
 
                     if self.log.get_param('photometry_complete'):
-                        self.photometry_complete.set('Completed under v{0}'.format(self.log.get_param('photometry_version')))
+                        self.photometry_complete.set(
+                            'Completed under v{0}'.format(self.log.get_param('photometry_version')))
                         self.fitting_button.activate()
 
                         if self.log.get_param('fitting_complete'):
-                            self.fitting_complete.set('Completed under v{0}'.format(self.log.get_param('fitting_version')))
+                            self.fitting_complete.set(
+                                'Completed under v{0}'.format(self.log.get_param('fitting_version')))
 
                     else:
                         self.photometry_complete.set('You need to complete this step to proceed')

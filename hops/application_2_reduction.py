@@ -5,13 +5,16 @@ import time
 import numpy as np
 import shutil
 import exoclock
-import hops.pylightcurve41 as plc
 
-from scipy.interpolate import interp1d
 from astropy.io import fits as pf
 
-from hops.hops_tools.fits import *
-from hops.hops_tools.image_analysis import image_mean_std, image_burn_limit, image_psf, bin_frame
+from hops.hops_tools.files import find_fits_files, get_fits_data_and_header, open_fits, save_fits
+from hops.hops_tools.files import open_dict, save_dict
+from hops.hops_tools.image_analysis import image_burn_limit
+from hops.hops_tools.reduction import combine_frames, reduce_dark_frame, reduce_flat_frame, stack_frames_calc
+from hops.hops_tools.reduction import compute_master_flat, reduce_science_frame, bin_and_crop_science_frame
+from hops.hops_tools.reduction import add_image_statistics_to_header, add_timing_and_coordinates_to_header
+from hops.hops_tools.reduction import mean_std_from_median_mad, get_saturation
 from hops.application_windows import MainWindow
 
 
@@ -21,13 +24,13 @@ class ReductionWindow(MainWindow):
 
         MainWindow.__init__(self, log, name='HOPS - Reduction', position=2)
 
-        self.colour_camera_mode = self.log.get_param('colour_camera_mode')
+        self.compress_reduced = True
 
         self.file_info = []
 
         self.bias_files = find_fits_files(self.log.get_param('bias_files'))
         self.bias_frames = []
-        self.bias_frames_exp = []
+        self.bias_exp_time = []
         self.bias_counter = 0
 
         self.dark_files = find_fits_files(self.log.get_param('dark_files'))
@@ -49,7 +52,7 @@ class ReductionWindow(MainWindow):
         self.psf = 10
 
         location_string = self.log.get_param('location').split(' ')
-        self.observatory = exoclock.Observatory(exoclock.Degrees(location_string[0]), 
+        self.observatory = exoclock.Observatory(exoclock.Degrees(location_string[0]),
                                                 exoclock.Degrees(location_string[1]))
         ra_dec_string = self.log.get_param('target_ra_dec').split(' ')
         self.target = exoclock.FixedTarget(exoclock.Hours(ra_dec_string[0]), exoclock.Degrees(ra_dec_string[1]))
@@ -60,7 +63,7 @@ class ReductionWindow(MainWindow):
         test_fits_data, test_fits_header = self.get_fits_data_and_header(test_fits_name)
 
         t0 = time.time()
-        _ = plc.mean_std_from_median_mad(test_fits_data)
+        _ = mean_std_from_median_mad(test_fits_data)
         self.fr_time = int(2000 * (time.time()-t0))
 
         self.progress_figure = self.FitsWindow(fits_data=test_fits_data, fits_header=test_fits_header,
@@ -87,7 +90,7 @@ class ReductionWindow(MainWindow):
 
         setup_window += [
             [[self.progress_science, 0], [self.progress_science_loop, 1]],
-            [[self.Button(text='STOP REDUCTION & RETURN TO MAIN MENU', command=self.trigger_exit), 0, 2]],
+            [[self.Button(text='STOP REDUCTION & RETURN TO MAIN MENU', commands=[self.trigger_exit]), 0, 2]],
             []
         ]
 
@@ -102,11 +105,15 @@ class ReductionWindow(MainWindow):
         if self.file_info == []:
             self.file_info = [len(fits_data[0]), len(fits_data), fits_header['BITPIX']]
         else:
-            if len(fits_data[0]) != self.file_info[0] or self.file_info[1] != len(fits_data) or self.file_info[2] != fits_header['BITPIX']:
+            if (len(fits_data[0]) != self.file_info[0] or self.file_info[1] != len(fits_data) or
+                    self.file_info[2] != fits_header['BITPIX']):
                 self.showinfo(
                     'Inconsistent image size',
                     'File {0} has different size from the other files in the dataset:\n'
-                    'x-size: {1} pixels\ny-size: {2} pixels\n{3}-bit\nReduction will terminate, please check your files!'.format(fits_name, len(fits_data[0]), len(fits_data), fits_header['BITPIX']))
+                    'x-size: {1} pixels\ny-size: {2} pixels\n{3}-bit\nReduction will terminate, '
+                    'please check your files!'.format(
+                        fits_name, len(fits_data[0]), len(fits_data), fits_header['BITPIX'])
+                )
                 self.show()
                 self.exit = True
                 self.after(self.reduce_science)
@@ -117,12 +124,16 @@ class ReductionWindow(MainWindow):
 
     def run_reduction(self):
 
+        self.progress_figure.adjust_size()
+
         if self.log.get_param('reduction_complete'):
             if self.askyesno('Overwrite files', 'Reduction has been completed, do you want to run again?'):
                 self.log.set_param('reduction_complete', False)
                 self.log.save_local_log()
             else:
                 self.log.set_param('proceed', True)
+                self.close()
+                return None
 
         if not self.log.get_param('reduction_complete'):
 
@@ -131,6 +142,15 @@ class ReductionWindow(MainWindow):
             else:
                 shutil.rmtree(self.log.reduction_directory)
                 os.mkdir(self.log.reduction_directory)
+
+            for path in [
+                self.log.all_frames_path,
+                self.log.all_stars_path,
+            ]:
+                try:
+                    os.remove(path)
+                except:
+                    pass
 
             self.after(self.get_bias)
 
@@ -150,15 +170,18 @@ class ReductionWindow(MainWindow):
                 self.progress_bias.initiate(len(self.bias_files))
 
             fits_data, fits_header = self.get_fits_data_and_header(self.bias_files[self.bias_counter])
-            self.bias_frames.append(np.ones_like(fits_data) * fits_data)
+            self.bias_frames.append(fits_data)
 
             try:
-                bias_exptime = fits_header[self.log.get_param('exposure_time_key')]
+                bias_exptime = float(fits_header[self.log.get_param('exposure_time_key')])
             except:
-                bias_exptime = 0
-            self.bias_frames_exp.append(bias_exptime)
+                bias_exptime = 0.0
 
-            print('{0}: median = {1}, exp.time = {2}'.format(self.bias_files[self.bias_counter], np.nanmedian(self.bias_frames[-1]), bias_exptime))
+            self.bias_exp_time.append(bias_exptime)
+
+            print('{0}: median = {1}, exp.time = {2}'.format(
+                self.bias_files[self.bias_counter], np.nanmedian(self.bias_frames[-1]), bias_exptime)
+            )
 
             self.progress_bias.update()
             self.bias_counter += 1
@@ -178,25 +201,22 @@ class ReductionWindow(MainWindow):
 
             if len(self.bias_frames) > 0:
 
-                consistent_exp_time = self.bias_frames_exp == np.median(self.bias_frames_exp)
+                consistent_exp_time = self.bias_exp_time == np.median(self.bias_exp_time)
 
-                self.bias_frames = [self.bias_frames[ff] for ff in range(len(self.bias_frames))  if consistent_exp_time[ff]]
+                self.bias_frames = [self.bias_frames[ff]
+                                    for ff in range(len(self.bias_frames)) if consistent_exp_time[ff]]
 
-                if self.log.get_param('master_bias_method') == 'median':
-                    self.master_bias = np.array([np.nanmedian([xx[ff] for xx in self.bias_frames], 0) for ff in range(len(self.bias_frames[0]))])
-                elif self.log.get_param('master_bias_method') == 'mean':
-                    self.master_bias = np.array([np.nanmean([xx[ff] for xx in self.bias_frames], 0) for ff in range(len(self.bias_frames[0]))])
-                else:
-                    self.master_bias = np.array([np.nanmedian([xx[ff] for xx in self.bias_frames], 0) for ff in range(len(self.bias_frames[0]))])
+                self.master_bias = combine_frames(self.bias_frames,
+                                                  method=self.log.get_param('master_bias_method'))
 
-                self.bias_frames_exp = np.median(self.bias_frames_exp)
+                self.bias_exp_time = np.median(self.bias_exp_time)
 
             else:
                 self.master_bias = 0.0
-                self.bias_frames_exp = 0.0
+                self.bias_exp_time = 0.0
 
             print('Median Bias: ', round(np.nanmedian(self.master_bias), 3))
-            print('Bias exp. time: ', self.bias_frames_exp)
+            print('Bias exp. time: ', self.bias_exp_time)
             self.progress_bias.show_message('Calculating master bias... Completed!')
 
             self.after(self.get_dark)
@@ -212,10 +232,16 @@ class ReductionWindow(MainWindow):
                 self.progress_dark.initiate(len(self.dark_files))
 
             fits_data, fits_header = self.get_fits_data_and_header(self.dark_files[self.dark_counter])
-            dark_frame = np.ones_like(fits_data) * fits_data
-            self.dark_frames.append((dark_frame - self.master_bias) / (fits_header[self.log.get_param('exposure_time_key')] - self.bias_frames_exp))
 
-            print('{0}: median = {1}'.format(self.dark_files[self.dark_counter], np.nanmedian(self.dark_frames[-1])))
+            self.dark_frames.append(
+                reduce_dark_frame(fits_data, self.master_bias,
+                                  float(fits_header[self.log.get_param('exposure_time_key')]),
+                                  self.bias_exp_time)
+            )
+
+            print('{0}: median = {1}'.format(
+                self.dark_files[self.dark_counter], np.nanmedian(self.dark_frames[-1]))
+            )
 
             self.progress_dark.update()
             self.dark_counter += 1
@@ -233,12 +259,9 @@ class ReductionWindow(MainWindow):
         else:
 
             if len(self.dark_frames) > 0:
-                if self.log.get_param('master_dark_method') == 'median':
-                    self.master_dark = np.array([np.nanmedian([xx[ff] for xx in self.dark_frames], 0) for ff in range(len(self.dark_frames[0]))])
-                elif self.log.get_param('master_dark_method') == 'mean':
-                    self.master_dark = np.array([np.nanmean([xx[ff] for xx in self.dark_frames], 0) for ff in range(len(self.dark_frames[0]))])
-                else:
-                    self.master_dark = np.array([np.nanmedian([xx[ff] for xx in self.dark_frames], 0) for ff in range(len(self.dark_frames[0]))])
+                self.master_dark = combine_frames(self.dark_frames,
+                                                  method=self.log.get_param('master_dark_method'))
+
             else:
                 self.master_dark = 0.0
 
@@ -258,10 +281,16 @@ class ReductionWindow(MainWindow):
                 self.progress_darkf.initiate(len(self.darkf_files))
 
             fits_data, fits_header = self.get_fits_data_and_header(self.darkf_files[self.darkf_counter])
-            darkf_frame = np.ones_like(fits_data) * fits_data
-            self.darkf_frames.append((darkf_frame - self.master_bias) / (fits_header[self.log.get_param('exposure_time_key')] - self.bias_frames_exp))
 
-            print('{0}: median = {1}'.format(self.darkf_files[self.darkf_counter], np.nanmedian(self.darkf_frames[-1])))
+            self.darkf_frames.append(
+                reduce_dark_frame(fits_data, self.master_bias,
+                                  float(fits_header[self.log.get_param('exposure_time_key')]),
+                                  self.bias_exp_time)
+            )
+
+            print('{0}: median = {1}'.format(
+                self.darkf_files[self.darkf_counter], np.nanmedian(self.darkf_frames[-1]))
+            )
 
             self.progress_darkf.update()
             self.darkf_counter += 1
@@ -279,12 +308,8 @@ class ReductionWindow(MainWindow):
         else:
 
             if len(self.darkf_frames) > 0:
-                if self.log.get_param('master_darkf_method') == 'median':
-                    self.master_darkf = np.array([np.nanmedian([xx[ff] for xx in self.darkf_frames], 0) for ff in range(len(self.darkf_frames[0]))])
-                elif self.log.get_param('master_darkf_method') == 'mean':
-                    self.master_darkf = np.array([np.nanmean([xx[ff] for xx in self.darkf_frames], 0) for ff in range(len(self.darkf_frames[0]))])
-                else:
-                    self.master_darkf = np.array([np.nanmedian([xx[ff] for xx in self.darkf_frames], 0) for ff in range(len(self.darkf_frames[0]))])
+                self.master_darkf = combine_frames(self.darkf_frames,
+                                                   method=self.log.get_param('master_darkf_method'))
             else:
                 self.master_darkf = self.master_dark
 
@@ -304,12 +329,15 @@ class ReductionWindow(MainWindow):
                 self.progress_flat.initiate(len(self.flat_files))
 
             fits_data, fits_header = self.get_fits_data_and_header(self.flat_files[self.flat_counter])
-            flat_frame = np.ones_like(fits_data) * fits_data
 
             self.flat_frames.append(
-                flat_frame - self.master_bias - (fits_header[self.log.get_param('exposure_time_key')] - self.bias_frames_exp) * self.master_darkf)
+                reduce_flat_frame(fits_data, self.master_darkf, self.master_bias,
+                                  float(fits_header[self.log.get_param('exposure_time_key')]), self.bias_exp_time)
+            )
 
-            print('{0}: median = {1}'.format(self.flat_files[self.flat_counter], np.nanmedian(self.flat_frames[-1])))
+            print('{0}: median = {1}'.format(
+                self.flat_files[self.flat_counter], np.nanmedian(self.flat_frames[-1]))
+            )
 
             self.progress_flat.update()
             self.flat_counter += 1
@@ -326,49 +354,9 @@ class ReductionWindow(MainWindow):
             self.after(self.reduce_science)
 
         else:
-
-            if len(self.flat_frames) > 0:
-                if self.log.get_param('master_flat_method') == 'mean':
-                    flat_frames = [ff / np.nanmean(ff) for ff in self.flat_frames]
-                    self.master_flat = np.array([np.nanmean([xx[ff] for xx in flat_frames], 0) for ff in range(len(flat_frames[0]))])
-                else:
-                    flat_frames = [ff / np.nanmedian(ff) for ff in self.flat_frames]
-                    self.master_flat = np.array([np.nanmedian([xx[ff] for xx in flat_frames], 0) for ff in range(len(flat_frames[0]))])
-                print('Median Flat: ', round(np.nanmedian(self.master_flat), 3))
-
-                if self.colour_camera_mode:
-                    self.master_flat[::2, ::2] = self.master_flat[::2, ::2] / np.nanmedian(self.master_flat[::2, ::2])
-                    self.master_flat[::2, 1::2] = self.master_flat[::2, 1::2] / np.nanmedian(self.master_flat[::2, 1::2])
-                    self.master_flat[1::2, ::2] = self.master_flat[1::2, ::2] / np.nanmedian(self.master_flat[1::2, ::2])
-                    self.master_flat[1::2, 1::2] = self.master_flat[1::2, 1::2] / np.nanmedian(self.master_flat[1::2, 1::2])
-                else:
-                    self.master_flat = self.master_flat / np.nanmedian(self.master_flat)
-
-                #     clean master flat
-
-                bp_map = np.zeros_like(self.master_flat)
-                bp_map = np.where(self.master_flat <= 0, 1, bp_map)
-                bp_map = np.where(np.isnan(self.master_flat), 1, bp_map)
-                bp_map = np.where(self.master_flat==np.inf, 1, bp_map)
-
-                self.master_flat[np.int_(bp_map)] = 1
-                bp_map[:, 0] = 0
-                bp_map[:, -1] = 0
-
-                for line in range(len(self.master_flat)):
-                    clean_pixs = np.where(bp_map[line] == 0)
-                    points = clean_pixs[0]
-                    values = self.master_flat[line][clean_pixs]
-                    line_model = interp1d(points, values)
-                    self.master_flat[line] = line_model(np.arange(len(self.master_flat[line])))
-
-                # self.master_flat = np.where(self.master_flat <= 0, 1, self.master_flat)
-                # self.master_flat = np.where(np.isnan(self.master_flat), 1, self.master_flat)
-                # self.master_flat = np.where(self.master_flat == np.inf, 1, self.master_flat)
-
-
-            else:
-                self.master_flat = 1.0
+            self.master_flat = compute_master_flat(self.flat_frames,
+                                                   method=self.log.get_param('master_flat_method'),
+                                                   colour_camera_mode=self.log.get_param('colour_camera_mode'))
 
             self.progress_flat.show_message('Calculating master flat... Completed!')
             sys.setrecursionlimit(100 * len(self.science_files))
@@ -376,13 +364,10 @@ class ReductionWindow(MainWindow):
 
     def reduce_science(self):
 
-        timing = False
-        # timing = True
-
         # correct each observation_files file
 
         if self.exit:
-            self.after(self.save)
+            self.after(self.stack)
 
         else:
 
@@ -391,105 +376,40 @@ class ReductionWindow(MainWindow):
 
             science_file = self.science_files[self.science_counter]
 
-            # correct it with master bias_files, master dark_files and master flat_files
-            t00 = time.time()
-            t0 = time.time()
+            # load fits file
+
             fits_data, fits_header = self.get_fits_data_and_header(science_file)
+            saturation = get_saturation(fits_header, self.log.hops_saturation_key)
 
-            if timing:
-                print('Loading: ', time.time()-t0)
+            # correct with master bias_files, master dark_files and master flat_files
 
-            t0 = time.time()
+            data_frame = reduce_science_frame(
+                fits_data, saturation, self.master_flat, self.master_dark, self.master_bias,
+                float(fits_header[self.log.get_param('exposure_time_key')]), self.bias_exp_time
+            )
 
-            saturation = image_burn_limit(fits_header, key=self.log.hops_saturation_key)
-            exp_time = float(fits_header[self.log.get_param('exposure_time_key')])
-            centroids_snr = self.log.get_param('centroids_snr')
-            stars_snr = self.log.get_param('stars_snr')
-            psf_guess = self.log.get_param('psf_guess')
-            data_frame = np.ones_like(fits_data) * fits_data
-            dq_frame = np.where(data_frame == saturation, 1, 0)
-            data_frame = (data_frame - self.master_bias - (exp_time - self.bias_frames_exp) * self.master_dark) / self.master_flat
-            data_frame[np.where(np.isnan(data_frame))] = 0
+            # Binning and cropping
 
-            if timing:
-                print('Reduction: ', time.time()-t0)
+            data_frame = bin_and_crop_science_frame(
+                data_frame, saturation, self.log.get_param('crop_x1'),
+                self.log.get_param('crop_x2'), self.log.get_param('crop_y1'), self.log.get_param('crop_y2'),
+                self.log.get_param('crop_edge_pixels'), self.log.get_param('bin_fits'),
+            )
 
-            t0 = time.time()
-
-            crop_x1 = int(max(0, self.log.get_param('crop_x1')))
-            crop_x2 = int(min(self.log.get_param('crop_x2'), len(data_frame[0])))
-            crop_y1 = int(max(0, self.log.get_param('crop_y1')))
-            crop_y2 = int(min(self.log.get_param('crop_y2'), len(data_frame)))
-
-            if crop_x2 == 0:
-                crop_x2 = len(data_frame[0])
-            if crop_y2 == 0:
-                crop_y2 = len(data_frame)
-
-            if not (np.array([crop_x1, crop_x2, crop_y1, crop_y2]) == np.array([0, len(data_frame[0]), 0, len(data_frame)])).all():
-                data_frame = data_frame[crop_y1: crop_y2]
-                data_frame = data_frame[:, crop_x1: crop_x2]
-                dq_frame = dq_frame[crop_y1: crop_y2]
-                dq_frame = dq_frame[:, crop_x1: crop_x2]
-
-            crop_edge_pixels = int(self.log.get_param('crop_edge_pixels'))
-            if crop_edge_pixels > 0:
-                data_frame = data_frame[crop_edge_pixels: -crop_edge_pixels, crop_edge_pixels: -crop_edge_pixels]
-                dq_frame = dq_frame[crop_edge_pixels: -crop_edge_pixels, crop_edge_pixels: -crop_edge_pixels]
-
-            bin_fits = self.log.get_param('bin_fits')
-            if bin_fits > 1:
-                data_frame = bin_frame(data_frame, bin_fits)
-                saturation = saturation * bin_fits * bin_fits
-                dq_frame = bin_frame(dq_frame, bin_fits)
-                dq_frame = np.where(dq_frame > 0, 1, 0)
-
-            data_frame[np.where(dq_frame > 0)] = saturation
-
-            if timing:
-                print('Binning and cropping: ', time.time()-t0)
+            # setting the refresh rate based on the computer's performance
 
             if self.science_counter == 0:
                 t0 = time.time()
-                _ = plc.mean_std_from_median_mad(data_frame)
+                _ = mean_std_from_median_mad(data_frame)
                 self.fr_time = int(1000 * (time.time()-t0))
 
-            t0 = time.time()
-            mean, std = image_mean_std(data_frame, samples=10000, mad_filter=5.0)
-            if timing:
-                print('SKY: ', time.time()-t0)
+            # calculate statistics
 
-            t0 = time.time()
-            psf = image_psf(data_frame, fits_header, mean, std, 0.8 * saturation,
-                            centroids_snr=centroids_snr, stars_snr=stars_snr, psf_guess=psf_guess)
-            if np.isnan(psf):
-                psf = 10
-                skip = True
-            else:
-                skip = False
-            if timing:
-                print('PSF: ', time.time()-t0)
-
-            t0 = time.time()
-            if self.log.get_param('observation_date_key') == self.log.get_param('observation_time_key'):
-                observation_time = ' '.join(fits_header[self.log.get_param('observation_date_key')].split('T'))
-            else:
-                observation_time = ' '.join([fits_header[self.log.get_param('observation_date_key')].split('T')[0],
-                                             fits_header[self.log.get_param('observation_time_key')]])
+            fits_header = add_image_statistics_to_header(data_frame, fits_header, saturation, self.log)
 
             try:
-                observation_time = exoclock.Moment(utc=observation_time)
-                if self.log.get_param('time_stamp') == 'exposure start':
-                    pass
-                elif self.log.get_param('time_stamp') == 'mid-exposure':
-                    observation_time = exoclock.Moment(jd_utc=observation_time.jd_utc() - 0.5 * exp_time / 24.0 / 3600.0)
-                elif self.log.get_param('time_stamp') == 'exposure end':
-                    observation_time = exoclock.Moment(jd_utc=observation_time.jd_utc() - exp_time / 24.0 / 3600.0)
-                else:
-                    raise RuntimeError('Not acceptable time stamp.')
 
-                julian_date = observation_time.jd_utc()
-                airmass = self.observatory.airmass(self.target, observation_time)
+                fits_header, observation_time = add_timing_and_coordinates_to_header(fits_header, self.log)
 
                 # write the new fits file
                 # important to keep it like this for windows!
@@ -498,62 +418,56 @@ class ReductionWindow(MainWindow):
                 time_in_file = time_in_file.split('.')[0]
                 time_in_file = time_in_file.replace('-', '_').replace(':', '_').replace('T', '_')
 
-                new_name = '{0}{1}_{2}'.format(self.log.reduction_prefix, time_in_file, science_file.split(os.sep)[-1])
-                primary = pf.PrimaryHDU()
-                image = pf.CompImageHDU()
+                new_name = '{0}{1}_{2}'.format(
+                    self.log.reduction_prefix, time_in_file, science_file.split(os.sep)[-1]
+                )
+
+                if self.compress_reduced:
+                    primary = pf.PrimaryHDU()
+                    image = pf.CompImageHDU()
+
+                else:
+                    image = pf.PrimaryHDU()
+
+                for i in fits_header:
+                    image.header.set(i, fits_header[i])
+
                 image.data = np.array(data_frame, dtype=np.int32)
-                image.header.set('BITPIX', fits_header['BITPIX'])
-                image.header.set('NAXIS1', len(fits_data[0]))
-                image.header.set('NAXIS2', len(fits_data))
-                image.header.set('XBINNING', bin_fits)
-                image.header.set('YBINNING', bin_fits)
-                image.header.set('BZERO',  0)
-                image.header.set('BSCALE', 1)
-                image.header.set(self.log.hops_observatory_latitude_key, self.observatory.latitude.deg_coord())
-                image.header.set(self.log.hops_observatory_longitude_key, self.observatory.longitude.deg())
-                image.header.set(self.log.hops_target_ra_key, self.target.ra.deg())
-                image.header.set(self.log.hops_target_dec_key, self.target.dec.deg_coord())
-                image.header.set(self.log.hops_datetime_key, observation_time.utc().isoformat())
-                image.header.set(self.log.hops_exposure_key, exp_time)
-                image.header.set(self.log.hops_filter_key, self.filter)
-                image.header.set(self.log.time_key, julian_date)
-                image.header.set(self.log.airmass_key, airmass)
-                image.header.set(self.log.mean_key, mean)
-                image.header.set(self.log.std_key, std)
-                image.header.set(self.log.hops_saturation_key, saturation)
-                image.header.set(self.log.psf_key, psf)
-                image.header.set(self.log.skip_key, skip)
                 image.header.set(self.log.align_x0_key, False)
                 image.header.set(self.log.align_y0_key, False)
                 image.header.set(self.log.align_u0_key, False)
                 image.header.set(self.log.align_u0_key, False)
-                fits_header[self.log.mean_key] = mean
-                fits_header[self.log.std_key] = std
 
-                plc.save_fits(pf.HDUList([primary, image]), os.path.join(self.log.reduction_directory, new_name))
+                if self.compress_reduced:
+                    save_fits(pf.HDUList([primary, image]), os.path.join(self.log.reduction_directory, new_name))
+                else:
+                    save_fits(pf.HDUList([image]), os.path.join(self.log.reduction_directory, new_name))
 
                 self.all_frames[new_name] = {
-                    self.log.mean_key: mean,
-                    self.log.std_key: std,
-                    self.log.psf_key: psf,
-                    self.log.time_key: julian_date,
-                    self.log.airmass_key: airmass,
-                    self.log.get_param('exposure_time_key'): exp_time,
-                    self.log.skip_key: skip,
+                    self.log.mean_key: fits_header[self.log.mean_key],
+                    self.log.std_key: fits_header[self.log.std_key],
+                    self.log.psf_key: fits_header[self.log.psf_key],
+                    self.log.bpp_key: fits_header[self.log.bpp_key],
+                    self.log.time_key: fits_header[self.log.time_key],
+                    self.log.airmass_key: fits_header[self.log.airmass_key],
+                    self.log.get_param('exposure_time_key'): fits_header[self.log.hops_exposure_key],
+                    self.log.skip_key: fits_header[self.log.skip_key],
                     self.log.align_x0_key: False,
                     self.log.align_y0_key: False,
                     self.log.align_u0_key: False,
                 }
 
-                if timing:
-                    print('Saving: ', time.time()-t0)
-                    print('Total: ', time.time()-t00)
-
                 self.progress_science.update()
                 self.science_counter += 1
 
                 if self.science_counter >= len(self.science_files):
-                    self.after(self.save)
+
+                    save_dict(self.all_frames, self.log.all_frames_path)
+                    self.log.set_param('reduction_complete', True)
+                    self.log.set_param('reduction_version', self.log.version)
+                    self.log.save_local_log()
+
+                    self.after(self.proceed)
                 else:
                     if self.progress_science_loop.get() or self.science_counter == 1:
                         self.progress_figure.load_fits(data_frame, fits_header, new_name)
@@ -561,25 +475,26 @@ class ReductionWindow(MainWindow):
 
                     if len(self.jobs) > self.jobs_completed + 1:
                         self.fr_time += 10
+                    else:
+                        self.fr_time -= 2
+                        self.fr_time = max(self.fr_time, 2)
+
+                    self.after(self.reduce_science, time=self.fr_time)
 
             except exoclock.errors.ExoClockInputError:
                 print('Bad time data, skipping frame: ', science_file)
-                print(observation_time)
 
                 self.science_counter += 1
 
-                pass
+                if self.science_counter >= len(self.science_files):
+                    self.after(self.proceed)
+                else:
+                    self.after(self.reduce_science, time=self.fr_time)
 
-            self.after(self.reduce_science, time=self.fr_time)
-
-    def save(self):
+    def proceed(self):
 
         if self.exit:
             self.close()
         else:
-            plc.save_dict(self.all_frames, self.log.all_frames)
-            self.log.set_param('reduction_complete', True)
-            self.log.set_param('reduction_version', self.log.version)
-            self.log.save_local_log()
             self.log.set_param('proceed', True)
             self.close()

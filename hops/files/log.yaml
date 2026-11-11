@@ -9,6 +9,7 @@ psf_guess: 2
 faint_target_mode: 0
 rotating_field_mode: 0
 colour_camera_mode: 0
+compress_reduced: 1
 min_x: 0
 min_y: 0
 max_x: 0
@@ -64,6 +65,8 @@ photometry_complete: false
 photometry_version: false
 reduction_complete: false
 reduction_version: false
+stacking_complete: false
+stacking_version: false
 trash: []
 exposure_time_key: EXPTIME
 observation_date_key: DATE-OBS
@@ -76,6 +79,7 @@ crop_x2: 0
 crop_y1: 0
 crop_y2: 0
 crop_edge_pixels: 0
+effective_exposure: 'OFF' ################################
 dark_files: dark
 darkf_files: ---
 flat_files: flat
@@ -98,6 +102,10 @@ photometry_fov_options:
   - auto
 show_good_comparisons: True
 show_good_comparisons_percent: 40
+show_good_comparisons_colour: True
+show_good_comparisons_colour_offset: 0.1
+show_good_comparisons_boxsize: 3
+show_good_comparisons_number: 1000
 use_variable_aperture: True
 use_geometric_center: False
 moving_target_mode: False
@@ -174,3 +182,4 @@ location: +dd:mm:ss +dd:mm:ss
 location_choice: 0
 detrending: 'Airmass'
 saturation: 0.95
+inspection_sky_plot: 'sky-counts'

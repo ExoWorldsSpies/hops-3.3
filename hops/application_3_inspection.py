@@ -1,13 +1,11 @@
 
 import os
 import numpy as np
-import hops.pylightcurve41 as plc
 import matplotlib.patches as mpatches
-from astropy.coordinates import SkyCoord
 
 from matplotlib.backend_bases import MouseEvent as mpl_MouseEvent
 
-from hops.hops_tools.fits import get_fits_data_and_header
+from hops.hops_tools.files import get_fits_data_and_header, open_dict, save_dict
 from hops.application_windows import MainWindow
 
 
@@ -17,10 +15,14 @@ class InspectiontWindow(MainWindow):
 
         MainWindow.__init__(self, log, name='HOPS - Inspection', position=2)
 
+        self.sky_plot = self.DropDown(initial='sky-counts',
+                                      options=['sky-counts', 'bright-pixels-percentage'],
+                                      instance=str, commands=[self.replot_inspection_figure])
+
         ##############################################################################
         # set up time series
 
-        self.all_frames = plc.open_dict(self.log.all_frames)
+        self.all_frames = open_dict(self.log.all_frames_path)
 
         self.science_files = []
         for science_file in self.all_frames:
@@ -33,7 +35,7 @@ class InspectiontWindow(MainWindow):
         self.science = []
         self.time_array = []
         self.sky_mean_array = []
-        self.sky_std_array = []
+        self.sky_bpp_array = []
         self.airmass_array = []
         self.psf_array = []
         self.skip_array = []
@@ -42,8 +44,14 @@ class InspectiontWindow(MainWindow):
             self.science_keys.append(science_file)
             self.science.append(os.path.join(self.log.reduction_directory, science_file))
             self.time_array.append(self.all_frames[science_file][self.log.time_key])
-            self.sky_mean_array.append(self.all_frames[science_file][self.log.mean_key] / self.all_frames[science_file][self.log.get_param('exposure_time_key')])
-            self.sky_std_array.append(self.all_frames[science_file][self.log.std_key] / self.all_frames[science_file][self.log.get_param('exposure_time_key')])
+            if 'TRUEEXP' in self.all_frames[science_file]:
+                self.sky_mean_array.append(self.all_frames[science_file][self.log.mean_key] / self.all_frames[science_file]['TRUEEXP'])
+            else:
+                self.sky_mean_array.append(self.all_frames[science_file][self.log.mean_key] / self.all_frames[science_file][self.log.get_param('exposure_time_key')])
+            if self.log.bpp_key in self.all_frames[science_file]:
+                self.sky_bpp_array.append(self.all_frames[science_file][self.log.bpp_key])
+            else:
+                self.sky_bpp_array.append(0)
             self.psf_array.append(self.all_frames[science_file][self.log.psf_key] * 2.355 / 2)
             try:
                 self.airmass_array.append(self.all_frames[science_file][self.log.airmass_key])
@@ -53,6 +61,7 @@ class InspectiontWindow(MainWindow):
 
         self.time_array = (np.array(self.time_array) - np.min(self.time_array)) * 24
         self.sky_mean_array = np.array(self.sky_mean_array)
+        self.sky_bpp_array = np.array(self.sky_bpp_array)
         self.airmass_array = np.array(self.airmass_array)
         self.psf_array = np.array(self.psf_array)
         self.skip_array = np.array(self.skip_array)
@@ -67,7 +76,7 @@ class InspectiontWindow(MainWindow):
         self.fits_figure = self.FitsWindow(fits_data=test_fits_data, fits_header=test_fits_header,
                                            input_name=self.science_files[0],
                                            show_controls=True, show_axes=True,
-                                           subplots_adjust=(0.07, 0.99, 0.05, 0.99))
+                                           subplots_adjust=(0.07, 0.99, 0.1, 0.99))
         self.fits_to_plot = np.argmin(self.time_array)
         self.replot_fits()
         ##############################################################################
@@ -76,17 +85,24 @@ class InspectiontWindow(MainWindow):
         # set up inspection plot
 
         # self.sky_threshold = self.Entry(value=self.log.get_param('sky_threshold'), instance=float,
-        #                                 command=self.apply_thresholds)
+        #                                 commands=[self.apply_thresholds])
         # self.psf_threshold = self.Entry(value=self.log.get_param('psf_threshold'), instance=float,
-        #                                 command=self.apply_thresholds)
+        #                                 commands=[self.apply_thresholds])
+
+        if self.sky_plot.get() == 'sky-counts':
+            self.sky_plot_array = self.sky_mean_array
+            sky_plot_label = 'Sky (counts/pix/s)'
+        else:
+            self.sky_plot_array = self.sky_bpp_array
+            sky_plot_label = 'Percentage of pixels\nbrighter than the sky'
 
         self.inspection_figure = self.FigureWindow(figsize=(1, 1), show_nav=True)
 
         self.inspection_figure_ax1 = self.inspection_figure.figure.add_subplot(211)
-        self.inspection_figure_ax1.plot(self.time_array, self.sky_mean_array, 'ko', ms=3)
-        self.excluded1,  = self.inspection_figure_ax1.plot(self.time_array[np.where(self.skip_array)], self.sky_mean_array[np.where(self.skip_array)], 'ro', ms=3)
+        self.included1,  = self.inspection_figure_ax1.plot(self.time_array, self.sky_plot_array, 'ko', ms=3)
+        self.excluded1,  = self.inspection_figure_ax1.plot(self.time_array[np.where(self.skip_array)], self.sky_plot_array[np.where(self.skip_array)], 'ro', ms=3)
         self.inspection_figure_ax1.set_xlim(np.min(self.time_array) - 0.1, np.max(self.time_array) + 0.1)
-        self.inspection_figure_ax1.set_ylabel('Sky (counts/pix/s)')
+        self.inspection_figure_ax1.set_ylabel(sky_plot_label)
         self.inspection_figure_ax1_airmass = self.inspection_figure_ax1.twinx()
         self.inspection_figure_ax1_airmass.plot(self.time_array, self.airmass_array, 'k--', lw=1)
         self.inspection_figure_ax1_airmass.set_ylim(1, max(self.airmass_array))
@@ -94,15 +110,15 @@ class InspectiontWindow(MainWindow):
         self.inspection_figure_ax1_airmass.set_zorder(0)
         self.inspection_figure_ax1.set_zorder(1)
         self.inspection_figure_ax1.patch.set_alpha(0.0)
-        if self.sky_mean_array[self.fits_to_plot] - min(self.sky_mean_array) > max(self.sky_mean_array) - self.sky_mean_array[self.fits_to_plot]:
+        if self.sky_plot_array[self.fits_to_plot] - min(self.sky_plot_array) > max(self.sky_plot_array) - self.sky_plot_array[self.fits_to_plot]:
             arrow1 = mpatches.Arrow(self.time_array[self.fits_to_plot],
-                                    min(self.sky_mean_array),
-                                    0, self.sky_mean_array[self.fits_to_plot] - min(self.sky_mean_array),
+                                    min(self.sky_plot_array),
+                                    0, self.sky_plot_array[self.fits_to_plot] - min(self.sky_plot_array),
                                     width=0.02 * (max(self.inspection_figure_ax1.get_xlim()) - min(self.inspection_figure_ax1.get_xlim())), fc='r')
         else:
             arrow1 = mpatches.Arrow(self.time_array[self.fits_to_plot],
-                                    max(self.sky_mean_array),
-                                    0, self.sky_mean_array[self.fits_to_plot] - max(self.sky_mean_array),
+                                    max(self.sky_plot_array),
+                                    0, self.sky_plot_array[self.fits_to_plot] - max(self.sky_plot_array),
                                     width=0.02 * (max(self.inspection_figure_ax1.get_xlim()) - min(self.inspection_figure_ax1.get_xlim())), fc='r')
         self.arrow1 = self.inspection_figure_ax1_airmass.add_patch(arrow1)
 
@@ -152,22 +168,21 @@ class InspectiontWindow(MainWindow):
         self.setup_window([
             [[self.fits_figure, 0, 1, 11], [self.inspection_figure, 1, 4]],
             [[self.Label(text='Double-click on a point to see the frame on the left panel.'), 1, 4]],
-            [],
             [[self.Label(text='SELECTED FRAME'), 1, 2],
-             [self.Button(text='EXCLUDE', command=[self.exclude_selected, self.replot_inspection_figure]), 3, 1],
-             [self.Button(text='INCLUDE', command=[self.include_selected, self.replot_inspection_figure]), 4, 1]],
+             [self.Button(text='EXCLUDE', commands=[self.exclude_selected, self.replot_inspection_figure]), 3, 1],
+             [self.Button(text='INCLUDE', commands=[self.include_selected, self.replot_inspection_figure]), 4, 1]],
             [[self.Label(text='ALL FRAMES IN SKY GRAPH'), 1, 2],
-             [self.Button(text='EXCLUDE', command=[self.exclude_in_sky, self.replot_inspection_figure]), 3, 1],
-             [self.Button(text='INCLUDE', command=[self.include_in_sky, self.replot_inspection_figure]), 4, 1]],
+             [self.Button(text='EXCLUDE', commands=[self.exclude_in_sky, self.replot_inspection_figure]), 3, 1],
+             [self.Button(text='INCLUDE', commands=[self.include_in_sky, self.replot_inspection_figure]), 4, 1]],
             [[self.Label(text='ALL FRAMES IN PSF GRAPH'), 1, 2],
-             [self.Button(text='EXCLUDE', command=[self.exclude_in_psf, self.replot_inspection_figure]), 3, 1],
-             [self.Button(text='INCLUDE', command=[self.include_in_psf, self.replot_inspection_figure]), 4, 1]],
+             [self.Button(text='EXCLUDE', commands=[self.exclude_in_psf, self.replot_inspection_figure]), 3, 1],
+             [self.Button(text='INCLUDE', commands=[self.include_in_psf, self.replot_inspection_figure]), 4, 1]],
             # [[self.Label(text='Sky Threshold'), 1], [self.sky_threshold, 2],
             #  [self.Label(text='PSF Threshold'), 3], [self.psf_threshold, 4]],
             [],
-            [[self.Button(text='RETURN TO \n MAIN MENU', command=self.close,
+            [[self.Button(text='RETURN TO \n MAIN MENU', commands=[self.close],
                           bg='red', highlightbackground='red'), 1, 2],
-             [self.Button(text='SAVE OPTIONS & \n PROCEED', command=self.save_and_proceed,
+             [self.Button(text='SAVE OPTIONS & \n PROCEED', commands=[self.save_and_proceed],
                           bg='green', highlightbackground='green'), 3, 2]],
             []
         ])
@@ -207,7 +222,7 @@ class InspectiontWindow(MainWindow):
                         sky_norm = self.ax1_height / (self.inspection_figure_ax1.get_ylim()[1] - self.inspection_figure_ax1.get_ylim()[0])
 
                         self.fits_to_plot = np.argmin(np.sqrt(
-                            ((event.xdata - np.array(self.time_array)) * time_norm) ** 2 + ((event.ydata - np.array(self.sky_mean_array)) * sky_norm) ** 2))
+                            ((event.xdata - np.array(self.time_array)) * time_norm) ** 2 + ((event.ydata - np.array(self.sky_plot_array)) * sky_norm) ** 2))
 
                     self.replot_fits()
                     self.replot_inspection_figure()
@@ -220,36 +235,52 @@ class InspectiontWindow(MainWindow):
 
     def replot_inspection_figure(self):
 
+        if self.sky_plot.get() == 'sky-counts':
+            self.sky_plot_array = self.sky_mean_array
+            sky_plot_label = 'Sky (counts/pix/s)'
+            self.included1.set_ydata(self.sky_mean_array)
+        else:
+            self.sky_plot_array = self.sky_bpp_array
+            sky_plot_label = 'Percentage of pixels\nbrighter than the sky'
+            self.included1.set_ydata(self.sky_bpp_array)
+
+        mmax, mmin = max(self.sky_plot_array), min(self.sky_plot_array)
+        w = mmax - mmin
+        self.inspection_figure_ax1.set_ylim(mmin - 0.05 * w, mmax + 0.05 * w)
+        self.inspection_figure_ax1.set_ylabel(sky_plot_label)
+
         self.excluded1.set_xdata(self.time_array[np.where(self.skip_array)])
-        self.excluded1.set_ydata(self.sky_mean_array[np.where(self.skip_array)])
+        self.excluded1.set_ydata(self.sky_plot_array[np.where(self.skip_array)])
 
         self.excluded2.set_xdata(self.time_array[np.where(self.skip_array)])
         self.excluded2.set_ydata(self.psf_array[np.where(self.skip_array)])
 
+        arrow_width = 0.02 * (max(self.time_array) - min(self.time_array))
+
         self.arrow1.remove()
-        if self.sky_mean_array[self.fits_to_plot] - min(self.sky_mean_array) > max(self.sky_mean_array) - self.sky_mean_array[self.fits_to_plot]:
-            arrow1 = mpatches.Arrow(self.time_array[self.fits_to_plot],
-                                    min(self.sky_mean_array),
-                                    0, self.sky_mean_array[self.fits_to_plot] - min(self.sky_mean_array),
-                                    width=0.02 * (max(self.time_array) - min(self.time_array)), fc='r')
+        if self.sky_plot_array[self.fits_to_plot] - mmin > mmax - self.sky_plot_array[self.fits_to_plot]:
+            arrow1 = mpatches.Arrow(
+                self.time_array[self.fits_to_plot], mmin,0, self.sky_plot_array[self.fits_to_plot] - mmin,
+                width=arrow_width, fc='r'
+            )
         else:
-            arrow1 = mpatches.Arrow(self.time_array[self.fits_to_plot],
-                                    max(self.sky_mean_array),
-                                    0, self.sky_mean_array[self.fits_to_plot] - max(self.sky_mean_array),
-                                    width=0.02 * (max(self.time_array) - min(self.time_array)), fc='r')
+            arrow1 = mpatches.Arrow(
+                self.time_array[self.fits_to_plot], mmax,0, self.sky_plot_array[self.fits_to_plot] - mmax,
+                width=arrow_width, fc='r'
+            )
         self.arrow1 = self.inspection_figure_ax1.add_patch(arrow1)
 
         self.arrow2.remove()
         if self.psf_array[self.fits_to_plot] - min(self.psf_array) > max(self.psf_array) - self.psf_array[self.fits_to_plot]:
-            arrow2 = mpatches.Arrow(self.time_array[self.fits_to_plot],
-                                    min(self.psf_array),
-                                    0, self.psf_array[self.fits_to_plot] - min(self.psf_array),
-                                    width=0.02 * (max(self.time_array) - min(self.time_array)), fc='r')
+            arrow2 = mpatches.Arrow(
+                self.time_array[self.fits_to_plot], min(self.psf_array),0,
+                self.psf_array[self.fits_to_plot] - min(self.psf_array), width=arrow_width, fc='r'
+            )
         else:
-            arrow2 = mpatches.Arrow(self.time_array[self.fits_to_plot],
-                                    max(self.psf_array),
-                                    0, self.psf_array[self.fits_to_plot] - max(self.psf_array),
-                                    width=0.02 * (max(self.time_array) - min(self.time_array)), fc='r')
+            arrow2 = mpatches.Arrow(
+                self.time_array[self.fits_to_plot], max(self.psf_array),0,
+                self.psf_array[self.fits_to_plot] - max(self.psf_array), width=arrow_width, fc='r'
+            )
         self.arrow2 = self.inspection_figure_ax2.add_patch(arrow2)
 
         self.inspection_figure.draw()
@@ -265,8 +296,8 @@ class InspectiontWindow(MainWindow):
 
         self.skip_array[np.where((self.time_array >= xlim1) *
                                  (self.time_array <= xlim2) *
-                                 (self.sky_mean_array >= ylim1) *
-                                 (self.sky_mean_array <= ylim2)
+                                 (self.sky_plot_array >= ylim1) *
+                                 (self.sky_plot_array <= ylim2)
                                  )] = True
 
     def exclude_in_psf(self):
@@ -291,8 +322,8 @@ class InspectiontWindow(MainWindow):
 
         self.skip_array[np.where((self.time_array >= xlim1) *
                                  (self.time_array <= xlim2) *
-                                 (self.sky_mean_array >= ylim1) *
-                                 (self.sky_mean_array <= ylim2)
+                                 (self.sky_plot_array >= ylim1) *
+                                 (self.sky_plot_array <= ylim2)
                                  )] = False
 
     def include_in_psf(self):
@@ -314,7 +345,7 @@ class InspectiontWindow(MainWindow):
         for science_file in range(len(self.science_files)):
             self.all_frames[self.science_files[science_file]][self.log.skip_key] = self.skip_array[science_file]
 
-        plc.save_dict(self.all_frames, self.log.all_frames)
+        save_dict(self.all_frames, self.log.all_frames_path)
 
         self.log.save_local_log()
 

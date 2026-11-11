@@ -9,10 +9,10 @@ import matplotlib
 import webbrowser
 import warnings
 
-from tkinter import Tk, TclError
-from tkinter import Label, Button, Entry, Checkbutton, Scrollbar, Listbox, PhotoImage, Radiobutton, Scale, Frame, Canvas
+from tkinter import Tk
+from tkinter import Label, Button, Entry, Checkbutton, Scrollbar, Listbox, Radiobutton, Scale, Frame
 from tkinter import StringVar, BooleanVar, DoubleVar, IntVar
-from tkinter import DISABLED, NORMAL, END, RIGHT, LEFT, TOP, BOTTOM, BOTH, Y, HORIZONTAL, VERTICAL, E, W, N, S, NW, TRUE, FALSE
+from tkinter import DISABLED, NORMAL, END, RIGHT, LEFT, TOP, BOTTOM, BOTH, Y, HORIZONTAL, VERTICAL, E, W, N, S
 
 from tkinter.ttk import Combobox, Style, Progressbar
 from tkinter.filedialog import askdirectory
@@ -25,11 +25,9 @@ except ImportError:
     NavigationToolbar2Tk = NavigationToolbar2TkAgg
 
 from matplotlib.cm import Greys, Greys_r
-from astropy.io import fits as pf
 
-import hops.pylightcurve41 as plc
-from hops.hops_tools.fits import get_fits_data
 from hops.application_log import HOPSLog
+from hops.hops_tools.reduction import mean_std_from_median_mad
 
 
 matplotlib.use('TkAgg')
@@ -52,6 +50,7 @@ class HOPSWindow:
 
         self.name = name
         self.position = position
+        self.position_ok = False
         self.root.wm_title(name)
         if sizex and sizey:
             self.root.geometry('{0}x{1}'.format(int(self.root.winfo_screenwidth() / sizex),
@@ -119,49 +118,55 @@ class HOPSWindow:
 
         self.root.update_idletasks()
 
+        window_width = float(self.root.winfo_reqwidth())
+        window_height = float(self.root.winfo_reqheight())
+
+        screen_width = float(self.root.winfo_screenwidth())
+        screen_height = float(self.root.winfo_screenheight())
+
         if self.position == 1:
             x = 0
             y = 0
 
         elif self.position == 2:
-            x = (self.root.winfo_screenwidth() - self.root.winfo_reqwidth()) / 2
+            x = int((screen_width - window_width) / 2.0)
             y = 0
 
         elif self.position == 3:
-            x = self.root.winfo_screenwidth() - self.root.winfo_reqwidth()
+            x = int(screen_width - window_width)
             y = 0
 
         elif self.position == 4:
             x = 0
-            y = (self.root.winfo_screenheight() - self.root.winfo_reqheight()) / 2
+            y = int((screen_height - window_height) / 2.0)
 
         elif self.position == 5:
-            x = (self.root.winfo_screenwidth() - self.root.winfo_reqwidth()) / 2
-            y = (self.root.winfo_screenheight() - self.root.winfo_reqheight()) / 2
+            x = int((screen_width - window_width) / 2.0)
+            y = int((screen_height - window_height) / 2.0)
 
         elif self.position == 6:
-            x = self.root.winfo_screenwidth() - self.root.winfo_reqwidth()
-            y = (self.root.winfo_screenheight() - self.root.winfo_reqheight()) / 2
+            x = int(screen_width - window_width)
+            y = int((screen_height - window_height) / 2.0)
 
         elif self.position == 7:
             x = 0
-            y = self.root.winfo_screenheight() - self.root.winfo_reqheight()
+            y = int(screen_height - window_height)
 
         elif self.position == 8:
-            x = (self.root.winfo_screenwidth() - self.root.winfo_reqwidth()) / 2
-            y = self.root.winfo_screenheight() - self.root.winfo_reqheight()
+            x = int((screen_width - window_width) / 2.0)
+            y = int(screen_height - window_height)
 
         elif self.position == 9:
-            x = self.root.winfo_screenwidth() - self.root.winfo_reqwidth()
-            y = self.root.winfo_screenheight() - self.root.winfo_reqheight()
+            x = int(screen_width - window_width)
+            y = int(screen_height - window_height)
 
         elif self.position == 10:
-            x = self.root.winfo_screenwidth()/2 - self.root.winfo_reqwidth()
-            y = (self.root.winfo_screenheight() - self.root.winfo_reqheight()) / 2
+            x = int(screen_width / 2.0 - window_width)
+            y = int((screen_height - window_height) / 2.0)
 
         elif self.position == 11:
-            x = self.root.winfo_screenwidth()/2
-            y = (self.root.winfo_screenheight() - self.root.winfo_reqheight()) / 2
+            x = int(screen_width / 2.0)
+            y = int((screen_height - window_height) / 2.0)
 
         else:
             x = 0
@@ -173,13 +178,19 @@ class HOPSWindow:
 
     def show(self):
 
-        self.reposition()
+        if not self.position_ok:
+            self.reposition()
 
         self.root.wm_attributes("-topmost", 1)
         self.root.after_idle(self.root.attributes, '-topmost', 0)
 
         self.root.deiconify()
+
+        self.position_ok = True
+
         self.update_idletasks()
+
+        self.root.focus_force()
 
     def hide(self):
 
@@ -241,20 +252,30 @@ class HOPSWindow:
 
     def askdirectory(self):
 
-        return askdirectory()
+        result = askdirectory()
+        self.root.focus_force()
+
+        return result
 
     def askyesno(self, *args, **kwargs):
 
-        return askyesno(*args, **kwargs)
+        result = askyesno(*args, **kwargs)
+        self.root.focus_force()
+
+        return result
 
     def askyesnocancel(self, *args, **kwargs):
 
-        return askyesnocancel(*args, **kwargs)
+        result = askyesnocancel(*args, **kwargs)
+        self.root.focus_force()
+        return result
+
 
     def showinfo(self, *args, **kwargs):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
             showinfo(*args, **kwargs)
+            self.root.focus_force()
 
     # tk variables initiated directly in - and linked with - the hops window
 
@@ -324,17 +345,22 @@ class HOPSWindow:
                     if obj[0].winfo_class() == 'Button':
                         obj[0].config(borderwidth=buttons_bd, font=button_font, padx=1, pady=1)
                     elif obj[0].winfo_class() == 'Entry':
-                        obj[0].configure(width=entries_wd, bd=entries_bd, font=main_font)
-                    elif obj[0].winfo_class() in ['Label', 'Radiobutton', 'Checkbutton']:
-                        if len(obj) == 5:
-                            if obj[4] == 'title':
-                                obj[0].configure(font=title_font, padx=0, pady=0)
-                            else:
-                                obj[0].configure(font=main_font, padx=0, pady=0)
+                        if obj[0].width:
+                            obj[0].configure(width=obj[0].width, bd=entries_bd, font=main_font)
+                        else:
+                            obj[0].configure(width=entries_wd, bd=entries_bd, font=main_font)
+                    elif obj[0].winfo_class() == 'Label':
+                        if obj[0].title:
+                            obj[0].configure(font=title_font, padx=0, pady=0)
                         else:
                             obj[0].configure(font=main_font, padx=0, pady=0)
+                    elif obj[0].winfo_class() in ['Radiobutton', 'Checkbutton']:
+                        obj[0].configure(font=main_font, padx=0, pady=0)
 
-                    if len(obj) >= 4:
+                    if len(obj) == 5:
+                        print(obj)
+                        obj[0].grid(row=row, column=obj[1], columnspan=obj[2], rowspan=obj[3], sticky=obj[4])
+                    elif len(obj) == 4:
                         obj[0].grid(row=row, column=obj[1], columnspan=obj[2], rowspan=obj[3])
                     elif len(obj) == 3:
                         obj[0].grid(row=row, column=obj[1], columnspan=obj[2])
@@ -380,7 +406,7 @@ class AddOnWindow(HOPSWindow):
 
 class HOPSWidget:
 
-    def __init__(self, window, widget, name):
+    def __init__(self, window, widget, name, commands=[]):
 
         self.window = window
         window.register(self)
@@ -388,6 +414,20 @@ class HOPSWidget:
         self.name = name
         self.root = self.window.root
         self.log = self.window.log
+        self.commands = commands
+
+        if name == 'Entry':
+            self.widget.bind(sequence='<KeyRelease>', func=self.internal_command)
+        elif name in ['Button', 'Checkbutton']:
+            self.widget['command'] = self.internal_command
+        elif name == 'DropDown':
+            self.commands = [self.widget.selection_clear] + commands
+            self.widget.bind('<<ComboboxSelected>>', self.internal_command)
+        else:
+            try:
+                self.widget['command'] = self.internal_command
+            except:
+                pass
 
     def winfo_class(self):
         return self.name
@@ -416,13 +456,38 @@ class HOPSWidget:
     def after(self, *args, **kwargs):
         self.window.after(*args, **kwargs)
 
+    def internal_command(self, *entry):
+
+        if len(self.commands) == 0:
+            return None
+
+        elif len(self.commands) == 1:
+            self.window.after(self.commands[0])
+
+        else:
+
+            functions = [self.nested_after(self.commands[-2], self.commands[-1])]
+            for i in range(len(self.commands)-2):
+
+                functions.append(self.nested_after(self.commands[-i-3], functions[-1]))
+            self.window.after(functions[-1])
+
+    def nested_after(self, function1, function2):
+
+        def xx():
+            function1()
+            self.window.after(function2, 10)
+
+        return xx
+
+
 
 # single widgets
 
 
 class HOPSLabel(HOPSWidget):
 
-    def __init__(self, window, text=' ', instance=str):
+    def __init__(self, window, text=' ', instance=str, title=False):
 
         if instance == str:
             self.variable = StringVar(window.root, value=text)
@@ -435,6 +500,8 @@ class HOPSLabel(HOPSWidget):
 
         widget = Label(window.root, textvar=self.variable)
 
+        self.title = title
+
         HOPSWidget.__init__(self, window, widget, 'Label')
 
     def set(self, value):
@@ -446,20 +513,20 @@ class HOPSLabel(HOPSWidget):
 
 class HOPSEntry(HOPSWidget):
 
-    def __init__(self, window, value=' ', instance=str, command=None):
+    def __init__(self, window, value=' ', instance=str, commands=[], width=0):
 
         self.instance = instance
 
         self.variable = StringVar(window.root, value=value)
 
+        self.width = width
+
         widget = Entry(window.main_frame, textvar=self.variable, validate='key')
 
         widget['validatecommand'] = (widget.register(self.validate), '%P', '%d')
 
-        if command:
-            widget.bind(sequence='<KeyRelease>', func=command)
+        HOPSWidget.__init__(self, window, widget, 'Entry', commands)
 
-        HOPSWidget.__init__(self, window, widget, 'Entry')
 
     def get(self):
 
@@ -486,52 +553,27 @@ class HOPSEntry(HOPSWidget):
     def set(self, value):
         self.variable.set(value)
 
-
-
 class HOPSButton(HOPSWidget):
 
-    def __init__(self, window, text=' ', command=None, **kwargs):
+    def __init__(self, window, text=' ', commands=[], **kwargs):
 
         self.variable = StringVar(window.root, value=text)
-        self.command=command
+        self.text = text
 
-        widget = Button(window.main_frame, textvar=self.variable, command=self.internal_command, **kwargs)
+        widget = Button(window.main_frame, textvar=self.variable, **kwargs)
 
-        HOPSWidget.__init__(self, window, widget, 'Button')
-
-    def internal_command(self):
-
-        if isinstance(self.command, list):
-            functions = [self.nested_after(self.command[-2], self.command[-1])]
-            for i in range(len(self.command)-2):
-
-                functions.append(self.nested_after(self.command[-i-3], functions[-1]))
-            self.window.after(functions[-1])
-
-        else:
-            self.command()
-
-    def nested_after(self, function1, function2):
-
-        def xx():
-            function1()
-            self.window.after(function2, 10)
-
-        return xx
+        HOPSWidget.__init__(self, window, widget, 'Button', commands)
 
 
 class HOPSCheckButton(HOPSWidget):
 
-    def __init__(self, window, text=' ', initial=False, command=None):
+    def __init__(self, window, text=' ', initial=False, commands=[]):
 
-        self.variable = BooleanVar(window.root, value=initial)
+        self.variable = BooleanVar(window.root, value=bool(int(initial)))
 
-        if command:
-            widget = Checkbutton(window.main_frame, text=text, variable=self.variable, command=command)
-        else:
-            widget = Checkbutton(window.main_frame, text=text, variable=self.variable)
+        widget = Checkbutton(window.main_frame, text=text, variable=self.variable)
 
-        HOPSWidget.__init__(self, window, widget, 'Checkbutton')
+        HOPSWidget.__init__(self, window, widget, 'Checkbutton', commands)
 
     def set(self, value):
         self.variable.set(value)
@@ -542,7 +584,7 @@ class HOPSCheckButton(HOPSWidget):
 
 class HOPSDropDown(HOPSWidget):
 
-    def __init__(self, window, initial, options, instance, command=None, width=None):
+    def __init__(self, window, initial, options, instance, commands=[], width=None):
 
         try:
             initial = instance(initial)
@@ -553,7 +595,7 @@ class HOPSDropDown(HOPSWidget):
 
         self.variable = StringVar(window.root, value=initial)
         self.instance = instance
-        self.command = command
+
 
         try:
 
@@ -570,19 +612,15 @@ class HOPSDropDown(HOPSWidget):
         if width:
             widget = Combobox(window.main_frame, textvariable=self.variable, state='readonly', width=width)
         else:
-            widget = Combobox(window.main_frame, textvariable=self.variable, state='readonly', width=int(window.log.entries_width * 0.8))
+            widget = Combobox(
+                window.main_frame, textvariable=self.variable, state='readonly',
+                width=int(window.log.entries_width * 0.8)
+            )
 
         options = [str(ff) for ff in options]
         widget['values'] = tuple(options)
 
-        widget.bind('<<ComboboxSelected>>', self.internal_command)
-
-        HOPSWidget.__init__(self, window, widget, 'DropDown')
-
-    def internal_command(self, *entry):
-        self.widget.selection_clear()
-        if self.command:
-            self.command()
+        HOPSWidget.__init__(self, window, widget, 'DropDown', commands)
 
     def set(self, value):
         self.variable.set(self.instance(value))
@@ -741,6 +779,7 @@ class HOPSFigureWindow(HOPSWidget):
 
     def draw(self, update_level=1):
         self.canvas.draw()
+
         if update_level == 0:
             pass
         elif update_level == 1:
@@ -748,13 +787,22 @@ class HOPSFigureWindow(HOPSWidget):
         elif update_level == 2:
             self.window.update()
 
+    def relim(self):
+
+        for ax in self.figure.get_axes():
+
+            ax.relim()
+            ax.autoscale()
+
+        self.figure.canvas.draw()
+        self.figure.canvas.flush_events()
 
 class HOPSFitsWindow(HOPSWidget):
 
     def __init__(self, window, fits_data=None, fits_header=None,
                  input_name=None, input_options=None,
                  max_figsize_percent=(0.9,0.8),  subplots_adjust=None,
-                 show_nav=False, show_controls=False, show_axes=False):
+                 show_nav=False, show_controls=False, show_axes=False, figsize=None):
 
         widget = Frame(window.root)
         HOPSWidget.__init__(self, window, widget, 'FitsWindow')
@@ -763,7 +811,7 @@ class HOPSFitsWindow(HOPSWidget):
         self.show_half = False
         self.max_figsize_percent = max_figsize_percent
 
-        self.figure = matplotlib.figure.Figure()
+        self.figure = matplotlib.figure.Figure(figsize=figsize)
         self.figure.patch.set_facecolor('white')
         self.canvas = FigureCanvasTkAgg(self.figure, widget)
         self.ax = self.figure.add_subplot(111)
@@ -779,6 +827,8 @@ class HOPSFitsWindow(HOPSWidget):
             self.figure.subplots_adjust(left=0.0, right=1.0, bottom=0.0, top=1.0)
 
         self.data = None
+        self.min = None
+        self.max = None
         self.mean = 0
         self.std = 0
         self.image = None
@@ -786,13 +836,12 @@ class HOPSFitsWindow(HOPSWidget):
         self.black_scale = DoubleVar(widget, value=0)
         self.vmax = DoubleVar(widget, value=65000)
         self.white_scale = DoubleVar(widget, value=1)
-        self.gamma = DoubleVar(widget, value=0)
         self.flip = IntVar(widget, value=0)
         self.mirror = IntVar(widget, value=0)
         self.white_sky = IntVar(widget, value=0)
 
         self.fits_name = StringVar(widget, value=input_name)
-        self.fits_name_label = Label(widget, textvar=self.fits_name)
+        self.ax.set_xlabel(self.fits_name)
 
         # extra widgets
 
@@ -820,14 +869,6 @@ class HOPSFitsWindow(HOPSWidget):
         self.white_entry['from_'] = 0
         self.white_entry['to'] = 1
 
-        self.gamma_entry = Scale(control_frame, resolution=0.0001, variable=self.gamma, orient=HORIZONTAL, showvalue=False)
-        self.gamma_entry.bind("<B1-Motion>", self.contrast)
-        self.gamma_entry.bind("<ButtonRelease-1>", self.contrast)
-        self.gamma_entry_label_0 = Label(control_frame, text='Stretch factor = ', anchor=E)
-        self.gamma_entry_label = Label(control_frame, textvar=self.gamma, anchor=W)
-        self.gamma_entry['from_'] = 0
-        self.gamma_entry['to'] = 1
-
         self.flip_button = Checkbutton(control_frame, text='Flip', variable=self.flip, command=self.flip_fov)
         self.mirror_button = Checkbutton(control_frame, text='Mirror', variable=self.mirror, command=self.mirror_fov)
         self.reverse_color_button = Checkbutton(control_frame, text='White Sky', variable=self.white_sky, command=self.reverse_color)
@@ -843,13 +884,11 @@ class HOPSFitsWindow(HOPSWidget):
         self.white_entry_label_0.grid(row=5, column=1, columnspan=2)
         self.white_entry_label.grid(row=5, column=3)
         self.white_entry.grid(row=6, column=1, columnspan=4, sticky=N+S+E+W)
-        self.gamma_entry_label_0.grid(row=7, column=1, columnspan=2)
-        self.gamma_entry_label.grid(row=7, column=3)
-        self.gamma_entry.grid(row=8, column=1, columnspan=4, sticky=N+S+E+W)
         self.reset_button.grid(row=9, column=1)
         self.flip_button.grid(row=9, column=2)
         self.mirror_button.grid(row=9, column=3)
         self.reverse_color_button.grid(row=9, column=4)
+
         Label(control_frame, text='Zoom:').grid(row=10, column=1, columnspan=2)
         self.zoom_out_button.grid(row=10, column=3)
         self.zoom_in_button.grid(row=10, column=4)
@@ -861,8 +900,6 @@ class HOPSFitsWindow(HOPSWidget):
         if show_nav:
             toolbar = NavigationToolbar2Tk(self.canvas, self.widget)
             toolbar.pack(side=BOTTOM)
-
-        self.fits_name_label.pack()
 
         if show_controls:
             control_frame.pack()
@@ -881,7 +918,7 @@ class HOPSFitsWindow(HOPSWidget):
         self.window.reposition()
 
         current_figure_height = self.canvas.get_tk_widget().winfo_reqheight()
-        current_figure_width = self.canvas.get_tk_widget().winfo_width()
+        current_figure_width = self.canvas.get_tk_widget().winfo_reqwidth()
 
         if self.root.winfo_reqheight() > self.max_figsize_percent[1] * self.root.winfo_screenheight():
             dh = (self.root.winfo_reqheight() - self.max_figsize_percent[1] * self.root.winfo_screenheight())
@@ -901,11 +938,6 @@ class HOPSFitsWindow(HOPSWidget):
 
         if input_name:
             input_name = os.path.split(input_name)[1]
-            if len(input_name) > 50:
-                split = [input_name[i:i + 50] for i in range(0, len(input_name), 50)]
-                input_name = '\n'.join(split)
-
-        self.fits_name.set(input_name)
 
         self.data = np.ones_like(fits_data) * fits_data
 
@@ -913,52 +945,50 @@ class HOPSFitsWindow(HOPSWidget):
             self.mean = fits_header[self.window.log.mean_key]
             self.std = fits_header[self.window.log.std_key]
         except:
-            self.mean, self.std = plc.mean_std_from_median_mad(fits_data)
+            self.mean, self.std = mean_std_from_median_mad(fits_data)
+
+        cutoff = max(np.min(self.data), self.mean + self.window.log.frame_low_std * self.std)
+
+        self.data = np.maximum(self.data, cutoff)
+        self.min = np.min(self.data)
+        self.max = np.max(self.data)
 
         self.ax.cla()
         if not self.show_axes:
             self.ax.axis('off')
         self.ax.tick_params(axis='y', rotation=90)
+        self.ax.set_xlabel(input_name)
 
-        self.vmin.set(self.mean + self.window.log.frame_low_std * self.std)
-        self.vmax.set(self.mean + self.window.log.frame_upper_std * self.std)
-        self.gamma.set(0)
+        self.vmin.set(round(self.mean + self.window.log.frame_low_std * self.std, 2))
+        self.vmax.set(round(self.mean + self.window.log.frame_upper_std * self.std, 2))
+        self.black_entry['from_'] = round(self.mean + self.window.log.frame_low_std * self.std, 2)
+        self.black_entry['to_'] = round(self.mean + self.window.log.frame_upper_std * self.std, 2)
+        self.white_entry['from_'] = round(self.mean + self.window.log.frame_low_std * self.std, 2)
+        self.white_entry['to_'] = round(self.mean + self.window.log.frame_upper_std * self.std, 2)
 
         if input_options:
             if input_options[0] != 'auto':
-                self.vmin.set(self.mean + input_options[0] * self.std)
+                self.vmin.set(round(self.mean + input_options[0] * self.std, 2))
             if input_options[1] != 'auto':
-                self.vmax.set(self.mean + input_options[1] * self.std)
-            self.gamma.set(input_options[2])
+                self.vmax.set(round(self.mean + input_options[1] * self.std, 2))
+
             self.flip.set(input_options[3])
             self.mirror.set(input_options[4])
             self.white_sky.set(input_options[5])
 
-        xmax = np.max(self.data)
-        xmin = np.min(self.data)
-        xm = self.mean
-        g = 3
-        a = 0.5
-
-        xx = (((self.vmin.get() - xm) ** 2) * ((1 - a) ** (2 * g)) / ((xmax - xm) ** 2)) ** (1 / (2 * g))
-        self.black_scale.set(a - xx)
-        xx = (((self.vmax.get() - xm) ** 2) * ((1 - a) ** (2 * g)) / ((xmax - xm) ** 2)) ** (1 / (2 * g))
-        self.white_scale.set(a + xx)
-
-        self.black_entry['from_'] = a - (((xmin - xm) ** 2) * ((1 - a) ** (2 * g)) / ((xmax - xm) ** 2)) ** (1 / (2 * g))
-        self.white_entry['from_'] = a - (((xmin - xm) ** 2) * ((1 - a) ** (2 * g)) / ((xmax - xm) ** 2)) ** (1 / (2 * g))
-
+        self.black_scale.set(self.vmin.get())
+        self.white_scale.set(self.vmax.get())
 
         if self.show_half:
             xl = len(self.data[0])
             yl = len(self.data)
             x1, x2 = int(0.25*xl), int(0.75*xl)
             y1, y2 = int(0.25*yl), int(0.75*yl)
-            self.image = self.ax.imshow(self.data[y1:y2,x1:x2] ** (10 ** - self.gamma.get()), origin='lower',
+            self.image = self.ax.imshow(self.data[y1:y2,x1:x2], origin='lower',
                                         extent=(x1, x2, y1, y2),
                                         cmap=Greys, vmin=self.vmin.get(), vmax=self.vmax.get())
         else:
-            self.image = self.ax.imshow(self.data ** (10 ** - self.gamma.get()), origin='lower',
+            self.image = self.ax.imshow(self.data, origin='lower',
                                         extent=(0, len(self.data[0]), 0, len(self.data)),
                                         cmap=Greys, vmin=self.vmin.get(), vmax=self.vmax.get())
 
@@ -1016,26 +1046,17 @@ class HOPSFitsWindow(HOPSWidget):
         if self.black_scale.get() >= self.white_scale.get():
             self.black_scale.set(0.9 * self.white_scale.get())
 
-        xmax = np.max(self.data)
-        xm = self.mean
-        g = 3
-        a = 0.5
+        self.vmin.set(round(self.black_scale.get(), 2))
+        self.vmax.set(round(self.white_scale.get(), 2))
 
-        self.vmin.set((((1 - a) ** (-g)) * (xmax - xm)) * ((self.black_scale.get() - a) ** g) + xm)
-        self.vmax.set((((1 - a) ** (-g)) * (xmax - xm)) * ((self.white_scale.get() - a) ** g) + xm)
+        self.image.set_clim(self.black_scale.get(), self.white_scale.get())
 
-        self.image.set_data(np.maximum(0, self.data) ** (10 ** - self.gamma.get()))
-
-        self.image.set_clim(
-            self.vmin.get() ** (10 ** -self.gamma.get()),
-            self.vmax.get() ** (10 ** -self.gamma.get())
-        )
         self.canvas.draw()
 
     def get_fov_options(self):
         try:
             return [(self.vmin.get() - self.mean)/self.std, (self.vmax.get() - self.mean)/self.std,
-                    self.gamma.get(), self.flip.get(), self.mirror.get(), self.white_sky.get(),
+                    0, self.flip.get(), self.mirror.get(), self.white_sky.get(),
                     int(self.ax.get_xlim()[0]), int(self.ax.get_xlim()[1]),
                     int(self.ax.get_ylim()[0]), int(self.ax.get_ylim()[1])]
         except:
@@ -1155,21 +1176,10 @@ class HOPSFitsWindow(HOPSWidget):
         self.vmin.set(self.mean + self.window.log.frame_low_std * self.std)
         self.vmax.set(self.mean + self.window.log.frame_upper_std * self.std)
 
-        xmax = np.max(self.data)
-        xm = self.mean
-        g = 3
-        a = 0.5
+        self.black_scale.set(self.vmin.get())
+        self.white_scale.set(self.vmax.get())
 
-        xx = (((self.vmin.get() - xm) ** 2) * ((1 - a) ** (2 * g)) / ((xmax - xm) ** 2)) ** (1 / (2 * g))
-        self.black_scale.set(a - xx)
-        xx = (((self.vmax.get() - xm) ** 2) * ((1 - a) ** (2 * g)) / ((xmax - xm) ** 2)) ** (1 / (2 * g))
-        self.white_scale.set(a + xx)
-
-        self.gamma.set(0)
-
-        self.image.set_data(np.maximum(0, self.data) ** (10 ** -self.gamma.get()))
-
-        self.image.set_clim(self.vmin.get() ** (10 ** -self.gamma.get()), self.vmax.get() ** (10 ** -self.gamma.get()))
+        self.image.set_clim(self.vmin.get(), self.vmax.get())
         self.draw()
 
     def draw(self, update_level=1):

@@ -5,7 +5,7 @@ import hops.pylightcurve41 as plc
 
 
 from scipy.optimize import minimize
-from astroquery.gaia import Gaia
+
 
 
 def _find_centroids(data_array, x_low, x_upper, y_low, y_upper, mean, std, burn_limit, psf, snr=4):
@@ -160,27 +160,3 @@ def _star_from_centroid(data_array, centroid_x, centroid_y, mean, std, burn_limi
         pass
 
     return star
-
-
-def _separation(ra1, dec1, ra2, dec2):
-    return (180.0/np.pi) * np.arccos(np.minimum(1, np.sin(dec1* np.pi / 180.0) * np.sin(dec2* np.pi / 180.0) +
-                                                np.cos(dec1* np.pi / 180.0) * np.cos(dec2* np.pi / 180.0) * np.cos(ra1* np.pi / 180.0 - ra2* np.pi / 180.0)))
-
-
-def _get_gaia_stars(ra_0, dec_0, radius, limit=100):
-
-    Gaia.ROW_LIMIT = limit
-    Gaia.MAIN_GAIA_TABLE = "gaiadr3.gaia_source"
-
-    query = "SELECT TOP {0} {1} FROM {2} WHERE parallax > 0 AND 1 = CONTAINS(POINT('ICRS', {3}, {4}), " \
-            "CIRCLE('ICRS', ra, dec, {5})) ORDER BY phot_g_mean_mag ASC".format(
-        limit,
-        'source_id, ra, dec, phot_g_mean_mag, phot_bp_mean_mag, phot_rp_mean_mag, parallax, pmra, pmdec',
-        Gaia.MAIN_GAIA_TABLE,
-        ra_0,
-        dec_0,
-        radius,
-    )
-    job = Gaia.launch_job_async(query)
-
-    return job.get_results()

@@ -55,13 +55,14 @@ class ObservingPlannerWindow(MainWindow):
         self.target = self.Label(text=' ', instance=str)
         self.target_search = self.Entry(value='M42', instance=str)
 
-        self.target_ra = self.Entry(value=' ', instance=str, command=self.update_window)
-        self.target_dec = self.Entry(value=' ', instance=str, command=self.update_window)
+        self.target_ra = self.Entry(value=' ', instance=str, commands=[self.update_window])
+        self.target_dec = self.Entry(value=' ', instance=str, commands=[self.update_window])
         self.target_ra_dec_test = self.Label(text=' ')
 
         now = datetime.datetime.now()
-        self.obs_year_month = self.Entry(value='{0} {1}'.format(now.year, str(now.month).zfill(2)), instance=str,
-                                         command=self.update_window)
+        self.obs_year_month = self.Entry(
+            value='{0} {1}'.format(now.year, str(now.month).zfill(2)), instance=str, commands=[self.update_window]
+        )
         self.obs_year_month_test = self.Label(text=' ')
 
         self.latitude = self.Entry(value=self.log.get_param('observatory_lat'), instance=str)
@@ -83,7 +84,7 @@ class ObservingPlannerWindow(MainWindow):
         self.ax1 = self.figure.figure.add_subplot(111)
         self.figure.figure.subplots_adjust(left=0.1, right=1 - 0.05, bottom=0.1, top=0.85)
 
-        self.plot_button = self.Button(text='RESET PLOT', command=self.plot)
+        self.plot_button = self.Button(text='RESET PLOT', commands=[self.plot])
 
         # setup window
 
@@ -117,7 +118,7 @@ class ObservingPlannerWindow(MainWindow):
             [],
             [[self.Label(text='Object'), 1]],
             [[self.target_search, 1],
-             [self.Button(text='SEARCH RA/DEC', command=self.search_object), 2], [self.target, 3]],
+             [self.Button(text='SEARCH RA/DEC', commands=[self.search_object]), 2], [self.target, 3]],
             [],
             [[self.Label(text='Manual target RA DEC\n(hh:mm:ss +/-dd:mm:ss)'), 1, 1, 2], [self.target_ra, 2],
              [self.target_ra_dec_test, 3, 1, 2]],

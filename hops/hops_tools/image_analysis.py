@@ -12,15 +12,9 @@ import astropy.units as u
 from astropy.wcs.utils import fit_wcs_from_points, pixel_to_skycoord
 from photutils.aperture import CircularAperture, aperture_photometry
 
-from .centroids_and_stars import _find_centroids, _star_from_centroid, _separation, _get_gaia_stars
+from .centroids_and_stars import _find_centroids, _star_from_centroid
+from .gaia import separation
 
-
-# try:
-#     import my_gaia
-#     default_gaia_engine = my_gaia.get_gaia_stars
-# except:
-
-default_gaia_engine = _get_gaia_stars
 
 def image_mean_std(fits_data,
                    samples=10000, mad_filter=5.0):
@@ -201,7 +195,9 @@ def image_find_stars(fits_data, fits_header, x_low=0, x_upper=None, y_low=0, y_u
                         sky_data = fits_data[sky_y_min:sky_y_max + 1, sky_x_min:sky_x_max + 1]
                         sky_data = np.ones_like(sky_data) * sky_data
 
-                        sky_data = sky_data[np.where((((sky_datax - x_mean)**2 + (sky_datay - y_mean)**2) > sky_radius_1**2) * (sky_data < star[0][1] + 3 * std))]
+                        sky, sky_error = plc.mean_std_from_median_mad(sky_data)
+
+                        sky_data = sky_data[np.where((((sky_datax - x_mean)**2 + (sky_datay - y_mean)**2) > sky_radius_1**2) * (sky_data < sky + 3 * sky_error))]
                         sky_area = len(sky_data.flatten())
 
                         sky, sky_error = plc.mean_std_from_median_mad(sky_data)
@@ -257,7 +253,15 @@ def image_find_stars(fits_data, fits_header, x_low=0, x_upper=None, y_low=0, y_u
 def image_plate_solve(fits_data, fits_header, ra, dec, timestamp,
                       mean=None, std=None, burn_limit=None, psf=None, stars=None, n=20, pixel=None,
                       progress_window=None, verbose=False, gaia_query_ext=None,
-                      gaia_engine=default_gaia_engine, initial_wcs=None, star_limit=None, sip_degree=3):
+                      gaia_engine=None, initial_wcs=None, star_limit=None, sip_degree=3):
+
+    if gaia_engine is None:
+        from .gaia import OnlineGAIA
+        gaia_engine = OnlineGAIA().get_gaia_stars
+
+    elif isinstance(gaia_engine, str):
+        from .gaia import LocalGAIA
+        gaia_engine = LocalGAIA(gaia_engine).get_gaia_stars
 
     if verbose:
         print('\nAnalysing frame...')
@@ -306,8 +310,8 @@ def image_plate_solve(fits_data, fits_header, ra, dec, timestamp,
     ra3, dec3 = default_wcs_A.all_pix2world([[len(fits_data[0]), len(fits_data)]], 0)[0]
     ra4, dec4 = default_wcs_A.all_pix2world([[len(fits_data[0]), 0]], 0)[0]
 
-    fov_radius = max([_separation(ra, dec, ra1, dec1), _separation(ra, dec, ra2, dec2),
-                      _separation(ra, dec, ra3, dec3), _separation(ra, dec, ra4, dec4)])
+    fov_radius = max([separation(ra, dec, ra1, dec1), separation(ra, dec, ra2, dec2),
+                      separation(ra, dec, ra3, dec3), separation(ra, dec, ra4, dec4)])
 
     if verbose:
         print('Initial FOV radius guess: ', fov_radius)
@@ -322,11 +326,11 @@ def image_plate_solve(fits_data, fits_header, ra, dec, timestamp,
     else:
         if len(stars) < n:
             selection = np.where(
-                _separation(ra, dec, gaia_query_ext['ra'], gaia_query_ext['dec']) < min(1.0, 1.5 * fov_radius))
+                separation(ra, dec, gaia_query_ext['ra'], gaia_query_ext['dec']) < min(1.0, 1.5 * fov_radius))
             gaia_query = (gaia_query_ext.copy())[selection][:min(100, 10 * len(stars))]
         else:
             selection = np.where(
-                _separation(ra, dec, gaia_query_ext['ra'], gaia_query_ext['dec']) < min(0.5, 1.5 * fov_radius))
+                separation(ra, dec, gaia_query_ext['ra'], gaia_query_ext['dec']) < min(0.5, 1.5 * fov_radius))
             gaia_query = (gaia_query_ext.copy())[selection][:min(100, 10 * len(stars))]
 
     for gaia_star_idx in range(len(gaia_query['ra'])):
@@ -425,8 +429,8 @@ def image_plate_solve(fits_data, fits_header, ra, dec, timestamp,
     ra3, dec3 = plate_solution.all_pix2world([[len(fits_data[0]), len(fits_data)]], 0)[0]
     ra4, dec4 = plate_solution.all_pix2world([[len(fits_data[0]), 0]], 0)[0]
 
-    fov_radius = max([_separation(ra, dec, ra1, dec1), _separation(ra, dec, ra2, dec2),
-                      _separation(ra, dec, ra3, dec3), _separation(ra, dec, ra4, dec4)])
+    fov_radius = max([separation(ra, dec, ra1, dec1), separation(ra, dec, ra2, dec2),
+                      separation(ra, dec, ra3, dec3), separation(ra, dec, ra4, dec4)])
 
     if verbose:
         print('Final FOV radius: ', fov_radius)
@@ -494,6 +498,7 @@ def image_plate_solve(fits_data, fits_header, ra, dec, timestamp,
 
     identified_stars = {
         'plate_solution': plate_solution,
+        'gaia_query': gaia_query,
         'identified_stars': {
             gaia_query[source_id_key][s1][nn]:{
                 'ra': gaia_query['ra'][s1][nn],
@@ -521,26 +526,6 @@ def image_plate_solve(fits_data, fits_header, ra, dec, timestamp,
     return identified_stars
 
 
-def bin_frame(data_frame, binning):
-
-    binning = int(binning)
-
-    if binning <= 1:
-        return data_frame
-
-    new_frame_ysize = int(len(data_frame)/binning)
-    new_frame_xsize = int(len(data_frame[0])/binning)
-
-    new_frame = np.zeros((new_frame_ysize, len(data_frame[0])))
-
-    for xx in range(binning):
-        new_frame += data_frame[xx:binning * new_frame_ysize:binning]
-
-    new_frame2 = np.zeros((new_frame_ysize, new_frame_xsize))
-    for xx in range(binning):
-        new_frame2 += new_frame[:, xx:binning * new_frame_xsize:binning]
-
-    return new_frame2
 
 
 def cartesian_to_polar(x_position, y_position, x_ref_position, y_ref_position):

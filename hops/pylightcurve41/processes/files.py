@@ -66,6 +66,7 @@ def copy_yaml(dictionary):
 
 
 def open_fits(path):
+
     with pf.open(path, memmap=False) as hdulist:
         internal_copy = copy_fits(hdulist)
         try:
@@ -81,15 +82,15 @@ def open_fits(path):
     return internal_copy
 
 
-def save_fits(hdulist, path):
+def save_fits(hdulist, path, overwrite=False):
     internal_copy = copy_fits(hdulist)
     try:
-        internal_copy.writeto(path, output_verify='fix')
+        internal_copy.writeto(path, output_verify='fix', overwrite=overwrite)
     except pf.VerifyError as e:
         hdu = int(str(e.args)[4:-4].split('\\n')[1].replace('HDU ', '').replace(':', ''))
         card = int(str(e.args)[4:-4].split('\\n')[2].replace('Card ', '').replace(':', ''))
         del internal_copy[hdu].header[card]
-        internal_copy.writeto(path, output_verify='fix')
+        internal_copy.writeto(path, output_verify='fix', overwrite=overwrite)
     
     del internal_copy
 

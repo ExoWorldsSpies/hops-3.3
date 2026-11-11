@@ -92,8 +92,9 @@ class HOPSLog:
         self.reduction_directory = 'REDUCED_DATA'
         self.reduction_prefix = 'out_'
         self.reduction_trash_directory = 'REDUCED_DATA_TRASH'
-        self.all_frames = 'all_frames.pickle'
-        self.all_stars = 'all_stars.pickle'
+        self.all_frames_path = 'all_frames.pickle'
+        self.all_stars_path = 'all_stars.pickle'
+        self.plate_solutions_path = 'plate_solutions.pickle'
         self.photometry_directory_base = 'PHOTOMETRY'
         self.fov_figure = 'FOV.pdf'
         self.lc_figure = 'RESULTS.pdf'
@@ -132,6 +133,7 @@ class HOPSLog:
         self.mean_key = 'MEAN'
         self.psf_key = 'PSF'
         self.std_key = 'STD'
+        self.bpp_key = 'BPP'
         self.skip_key = 'SKIP'
         self.time_key = 'HOPSJD'
         self.airmass_key= 'AIRMASS'
@@ -361,5 +363,3 @@ class HOPSLog:
 
     def debug(self):
         print(traceback.format_exc())
-
-

@@ -1,5 +1,5 @@
 
-__version__ = '3.3.9'
+__version__ = '3.3.10'
 __message__ = ('Version 3.3 is now online with new features!'
                '\nv3.3.1 - UltraShortExposure mode, for stellar occultations.'
                '\nv3.3.2 - Handling of saturated stars and better gray scale for plots.'
@@ -9,7 +9,8 @@ __message__ = ('Version 3.3 is now online with new features!'
                '\nv3.3.6 - Bypass exotethys loading error when paths have spaces.'
                '\nv3.3.7 - Fix alignment bug for small number of stars.'
                '\nv3.3.8 - Correct bad pixels in flat frames, improvements in alignment and plate-solving.'
-               '\nv3.3.9 - Check for alternative Simbad connections.')
+               '\nv3.3.9 - Check for alternative Simbad connections.'
+               '\nv3.3.10- Sync with v4.0 and add long-term-support.')
 
 from .__run__ import run_app
 
